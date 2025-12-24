@@ -728,13 +728,14 @@ class var : public internal::oox_var_base {
     }
 
     void* allocate_deferred() noexcept {
-        auto *v = internal::task::allocate<internal::task_node_slots<1>>();
+        using dummy_t = std::byte;
+        auto *v = internal::task::allocate<internal::storage_task<1, std::aligned_storage_t<sizeof(dummy_t), alignof(dummy_t)>>>();
         __OOX_TRACE("%p oox::var(deferred)", v);
         // Make writers behave like for a normal initial value (next_writer=1),
         // BUT do NOT mark the node completed (head stays nullptr), so readers block.
         v->out(0).next_writer.store((internal::task_node*)uintptr_t(1), std::memory_order_release);
         // v->head is intentionally left as nullptr (not ready)
-        this->bind_to(v, (char*)v + sizeof(internal::task_node_slots<1>), 2);
+        this->bind_to(v, &v->my_precious, 2);
         this->is_deferred = true;
         return storage_ptr;
     }
