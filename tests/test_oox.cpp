@@ -17,6 +17,7 @@ bool g_oox_verbose = false;
 #include <iostream>
 #include <numeric>
 #include <vector>
+#include <functional>
 
 /////////////////////////////////////// EXAMPLES ////////////////////////////////////////
 
@@ -54,7 +55,7 @@ namespace ArchSample {
 #define OOX OOX_STD
 #endif
 
-int plus(int a, int b) { return a+b; }
+auto plus = std::plus<int>();
 
 TEST(OOX, Simple) {
     const oox::var<int> a = oox::run(plus, 2, 3);
