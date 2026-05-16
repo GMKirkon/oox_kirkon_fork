@@ -15,7 +15,8 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(benchmark)
 
-list(APPEND OOX_BENCHMARKS bench_fib bench_loops)
+list(APPEND OOX_BENCHMARKS bench_fib bench_loops
+                          bench_success_graphs bench_branch_cancellation)
 set(OOX_BACKENDS)
 
 find_package(benchmark REQUIRED)
@@ -64,3 +65,8 @@ foreach(bench IN LISTS OOX_BENCHMARKS)
     endforeach()
   endforeach()
 endforeach()
+
+option(OOX_BENCH_BASELINES "Build cross-framework baseline benchmarks" ON)
+if(OOX_BENCH_BASELINES)
+  add_subdirectory(baselines)
+endif()
