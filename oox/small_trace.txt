@@ -1,0 +1,36 @@
+20333597:[oox-lifetime] release_enter self=0x1051a1a00 life=2 n=0 gen=-1
+20333598:[oox-lifetime] exec_enter_value self=0x1064e5c00 life=2 n=-1 gen=226
+20333599:[oox-lifetime] release_enter self=0x104c54e00 life=2 n=0 gen=-1
+20333600:[oox-lifetime] release_enter self=0x1064e7700 life=2 n=2 gen=-1
+20333601:[oox-lifetime] release_delete self=0x1064e7700 life=2 n=2 gen=2405
+20333602:[oox-lifetime] release_enter self=0x104c9b900 life=2 n=0 gen=-1
+20333603:[oox-lifetime] release_delete self=0x104c9b900 life=0 n=0 gen=2750
+20333604:[oox-lifetime] alloc self=0x104c9b900 life=0 n=0 gen=2750
+20333605:[oox-lifetime] spawn self=0x104c9b900 life=2 n=-1 gen=-1
+20333606:[oox-lifetime] exec_enter_value self=0x1051a2a00 life=2 n=-1 gen=2605
+20333607:[oox-lifetime] exec_enter_value self=0x1064ece00 life=2 n=-1 gen=860
+20333608:[oox-lifetime] spawn self=0x1064ee100 life=2 n=-1 gen=-1
+20333609:[oox-lifetime] release_enter self=0x1064ece00 life=2 n=0 gen=-1
+20333610:[oox-lifetime] release_enter self=0x1064e2c00 life=2 n=0 gen=-1
+20333611:[oox-lifetime] exec_enter_value self=0x1064ee100 life=2 n=-1 gen=121
+20333612:[oox-lifetime] release_enter self=0x1064ee100 life=2 n=0 gen=-1
+20333613:[oox-lifetime] release_enter self=0x10519e300 life=2 n=2 gen=-1
+20333614:[oox-lifetime] release_delete self=0x10519e300 life=2 n=2 gen=127
+20333615:[oox-lifetime] alloc self=0x10519e300 life=0 n=0 gen=128
+20333616:[oox-lifetime] release_enter self=0x1064ecc00 life=2 n=0 gen=-1
+20333617:[oox-lifetime] base_execute_after_delete self=0x104c9b900 life=2 n=-1 gen=2750
+20333618:[oox-lifetime] base_execute self=0x104c9b900 life=2 n=-1 gen=2750
+20333619:[oox-lifetime] release_enter self=0x1064ec400 life=2 n=2 gen=-1
+20333620:Assertion failed: (false), funct[oox-lifetime] release_delete self=0x1064ec400 life=2 n=2 gen=2345
+20333621:[oox-lifetime] release_enter self=0x104c9ad00 life=2 n=2 gen=-1
+20333622:[oox-lifetime] release_delete self=0x104c9ad00 life=2 n=2 gen=10724
+20333623:[oox-lifetime] spawn self=0x10519e300 life=2 n=-1 gen=-1
+20333624:ion execute, file oox.h, line 33[oox-lifetime] release_enter self=0x10519e800 life=2 n=2 gen=-1
+20333625:[oox-lifetime] release_delete self=0x10519e800 life=2 n=2 gen=2454
+20333626:[oox-lifetime] exec_enter_value self=0x10519e300 life=2 n=-1 gen=128
+20333627:7.
+20333628:[oox-lifetime] release_enter self=0x10519e300 life=2 n=0 gen=-1
+20333629:[oox-lifetime] spawn self=0x1051a2800 life=2 n=-1 gen=-1
+20333630:[oox-lifetime] spawn self=0x1051a2700 life=2 n=-1 gen=-1
+20333631:[oox-lifetime] spawn self=0x1051a2600 life=2 n=-1 gen=-1
+20333632:[oox-lifetime] release_enter self=0x104c97500 life=2 n=0 gen=-1

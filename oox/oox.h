@@ -9,9 +9,15 @@
 #include <type_traits>
 #include <limits>
 #include <atomic>
+#include <cstdarg>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <cstdio>
+#include <cstdlib>
+#include <mutex>
 #include <new>
+#include <unordered_map>
 #ifndef OOX_EXCEPTIONS_ENABLED
 #define OOX_EXCEPTIONS_ENABLED 0
 #endif
@@ -54,6 +60,69 @@ struct deferred_t { explicit constexpr deferred_t(int = 0) {} };
 inline constexpr deferred_t deferred{};
 
 namespace internal {
+
+inline bool trace_lifetime_enabled() {
+    static const bool enabled = std::getenv("OOX_TRACE_LIFETIME") != nullptr;
+    return enabled;
+}
+
+inline int trace_lifetime_level() {
+    if (!trace_lifetime_enabled()) return 0;
+    const char* raw = std::getenv("OOX_TRACE_LIFETIME_LEVEL");
+    if (raw == nullptr) return 2;
+    return std::atoi(raw);
+}
+
+struct lifetime_debug_info {
+    std::uint64_t generation{0};
+    bool alive{false};
+};
+
+inline std::mutex& lifetime_debug_mutex() {
+    static std::mutex m;
+    return m;
+}
+
+inline std::unordered_map<const void*, lifetime_debug_info>& lifetime_debug_map() {
+    static std::unordered_map<const void*, lifetime_debug_info> map;
+    return map;
+}
+
+inline std::uint64_t lifetime_debug_on_alloc(const void* self) {
+    if (!trace_lifetime_enabled()) return 0;
+    std::lock_guard<std::mutex> lock(lifetime_debug_mutex());
+    auto& entry = lifetime_debug_map()[self];
+    ++entry.generation;
+    entry.alive = true;
+    return entry.generation;
+}
+
+inline std::uint64_t lifetime_debug_on_delete(const void* self) {
+    if (!trace_lifetime_enabled()) return 0;
+    std::lock_guard<std::mutex> lock(lifetime_debug_mutex());
+    auto& entry = lifetime_debug_map()[self];
+    entry.alive = false;
+    return entry.generation;
+}
+
+inline lifetime_debug_info lifetime_debug_query(const void* self) {
+    if (!trace_lifetime_enabled()) return {};
+    std::lock_guard<std::mutex> lock(lifetime_debug_mutex());
+    auto& map = lifetime_debug_map();
+    auto it = map.find(self);
+    if (it == map.end()) return {};
+    return it->second;
+}
+
+inline void trace_lifetime_event(const char* event, const void* self, int life_count, int n = -1, long long generation = -1) {
+    const int level = trace_lifetime_level();
+    if (level <= 0) return;
+    if (level == 1 &&
+        std::strcmp(event, "exec_after_delete") != 0 &&
+        std::strcmp(event, "base_execute") != 0 &&
+        std::strcmp(event, "base_execute_after_delete") != 0) return;
+    std::fprintf(stderr, "[oox-lifetime] %s self=%p life=%d n=%d gen=%lld\n", event, self, life_count, n, generation);
+}
 
 inline constexpr std::uintptr_t k_task_done_tag = 0x1;
 inline constexpr std::uintptr_t k_task_tag_mask = k_task_done_tag;
@@ -231,7 +300,11 @@ using tbb_task = tbb::detail::d1::task;
 using tbb::detail::d1::small_object_allocator;
 static tbb::task_group_context tbb_context;
 #define TASK_EXECUTE_METHOD tbb_task* execute(execution_data&) override
+#if defined(OOX_DISABLE_EXEC_LIFETIME_GUARD) && OOX_DISABLE_EXEC_LIFETIME_GUARD
+#define OOX_TASK_EXECUTE_LIFETIME_GUARD do { } while (false)
+#else
 #define OOX_TASK_EXECUTE_LIFETIME_GUARD ::oox::internal::task::execute_lifetime_guard oox_execute_lifetime_guard{this}
+#endif
 
 struct task : public tbb_task, task_life {
     tbb::detail::d1::wait_context waiter{1};
@@ -241,6 +314,7 @@ struct task : public tbb_task, task_life {
     struct execute_lifetime_guard {
         task* self;
         ~execute_lifetime_guard() {
+            trace_lifetime_event("guard_release", self, self->life_get_count(), 1);
             self->release(1);
         }
     };
@@ -255,6 +329,11 @@ struct task : public tbb_task, task_life {
 #endif
 
     TASK_EXECUTE_METHOD {
+        const auto dbg = lifetime_debug_query(this);
+        if (!dbg.alive) {
+            trace_lifetime_event("base_execute_after_delete", this, life_get_count(), -1, static_cast<long long>(dbg.generation));
+        }
+        trace_lifetime_event("base_execute", this, life_get_count(), -1, static_cast<long long>(dbg.generation));
         __OOX_ASSERT(false, "");
         return nullptr;
     }
@@ -263,7 +342,10 @@ struct task : public tbb_task, task_life {
         return nullptr;
     }
     void release( int n = 1 ) {
+        trace_lifetime_event("release_enter", this, life_get_count(), n);
         if(life_release(n)) {
+            const auto gen = lifetime_debug_on_delete(this);
+            trace_lifetime_event("release_delete", this, life_get_count(), n, static_cast<long long>(gen));
 #if OOX_USE_STDMALLOC
             delete this;
 #else
@@ -275,19 +357,24 @@ struct task : public tbb_task, task_life {
     template<typename T, typename... Args>
     static T* allocate(Args && ... args) {
 #if OOX_USE_STDMALLOC
-        return new T(std::forward<Args>(args)...);
+        auto* t = new T(std::forward<Args>(args)...);
 #else
         small_object_allocator a{};
         auto *t = a.new_object<T>(std::forward<Args>(args)...);
         t->alloc = a; // store deallocation info
-        return t;
 #endif
+        const auto gen = lifetime_debug_on_alloc(t);
+        trace_lifetime_event("alloc", t, t->life_get_count(), 0, static_cast<long long>(gen));
+        return t;
     }
     void spawn() {
 #if TBB_USE_ASSERT
         is_spawned.store(true, std::memory_order_release);
 #endif
+#if !(defined(OOX_DISABLE_EXEC_LIFETIME_GUARD) && OOX_DISABLE_EXEC_LIFETIME_GUARD)
         life_count.fetch_add(1, std::memory_order_acq_rel);
+#endif
+        trace_lifetime_event("spawn", this, life_get_count());
         tbb::detail::d1::spawn(*this, tbb_context);
     }
     void wait() {
@@ -1037,6 +1124,11 @@ struct alignas(64) functional_task : storage_task<slots, F>, result_state<R, fal
     using result_base = result_state<R, false>;
     using functor_base::functor_base;
     TASK_EXECUTE_METHOD {
+        const auto dbg = lifetime_debug_query(this);
+        if (!dbg.alive) {
+            trace_lifetime_event("exec_after_delete", this, this->life_get_count(), -1, static_cast<long long>(dbg.generation));
+        }
+        trace_lifetime_event("exec_enter_value", this, this->life_get_count(), -1, static_cast<long long>(dbg.generation));
         OOX_TASK_EXECUTE_LIFETIME_GUARD;
         __OOX_TRACE("%p do_run: start",this);
         result_base::emplace(functor_base::value()());
@@ -1052,6 +1144,11 @@ template<int slots, typename F>
 struct functional_task<slots, F, void> : storage_task<slots, F> {
     using storage_task<slots, F>::storage_task;
     TASK_EXECUTE_METHOD {
+        const auto dbg = lifetime_debug_query(this);
+        if (!dbg.alive) {
+            trace_lifetime_event("exec_after_delete", this, this->life_get_count(), -1, static_cast<long long>(dbg.generation));
+        }
+        trace_lifetime_event("exec_enter_void", this, this->life_get_count(), -1, static_cast<long long>(dbg.generation));
         OOX_TASK_EXECUTE_LIFETIME_GUARD;
         __OOX_TRACE("%p do_run: start",this);
         this->value()();
@@ -1067,6 +1164,11 @@ struct functional_task<slots, F, var<VT> > : storage_task<slots, F> {
     std::aligned_storage_t<sizeof(var<VT>), alignof(var<VT>)> my_result;
     bool is_executed : 1 = false;
     TASK_EXECUTE_METHOD {
+        const auto dbg = lifetime_debug_query(this);
+        if (!dbg.alive) {
+            trace_lifetime_event("exec_after_delete", this, this->life_get_count(), -1, static_cast<long long>(dbg.generation));
+        }
+        trace_lifetime_event("exec_enter_forward", this, this->life_get_count(), -1, static_cast<long long>(dbg.generation));
         OOX_TASK_EXECUTE_LIFETIME_GUARD;
 #if 0
         __OOX_TRACE("%p do_run: start forward",this);
