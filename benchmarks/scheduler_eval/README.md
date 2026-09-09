@@ -1,8 +1,38 @@
 # Native scheduler evaluation
 
-See [the porting-plan status](PLAN_STATUS.md) for the remaining gaps versus the
+Start with the [MR review guide](docs/REVIEW_GUIDE.md) for scope and review order.
+
+## Directory layout
+
+- `bench/`: benchmark registrations and timed entry points.
+- `workloads/`: workload algorithms and granularity control.
+- `runtime/`: scheduler adapters and shared execution helpers.
+- `metrics/`: scheduler statistics and optional PAPI counters.
+- `probes/`: scheduling distribution, spin tracing, and timespan tuning.
+- `tests/`: correctness tests, fixtures, and the isolated fake-PAPI harness.
+- `tools/`: dataset acquisition, analysis, plotting, and CI helpers.
+- `data/`: the original-dataset catalog (downloaded inputs stay outside the source tree).
+- `docs/`: design, provenance, usage guides, and plan status.
+
+`run.py` remains the main entry point. CMake target names and executable output
+paths are unchanged; invoke helper scripts from `tools/`.
+
+All native evaluation backends leave per-worker CPU pinning disabled. The runner
+disables OpenMP-specific repinning as well, so every mode inherits the same CPU
+set. Use `--cpu-node` on Linux to restrict that set uniformly; this is not a
+promise of identical worker-to-core assignments. Direct executable invocations
+must likewise avoid externally configured OpenMP affinity.
+
+Result metadata records every measured executable's SHA-256 and size, and checks
+that those files did not change during the run. `checkout` records the current
+revision, dirty status, and tracked-diff hash. The legacy `oox_commit` is the
+checkout revision only: it does not identify the binary's source revision.
+`binary_source_revision` remains null because the runner cannot prove how an
+existing build was produced. Keep the build and its source snapshot together.
+
+See [the porting-plan status](docs/PLAN_STATUS.md) for the remaining gaps versus the
 original full reproduction plan.
-The current remaining scope is [original datasets and PAPI](DATASETS_AND_PAPI.md).
+The current remaining scope is [original datasets and PAPI](docs/DATASETS_AND_PAPI.md).
 Hardware measurement campaigns and legacy-runtime builds are not required.
 
 `SERIAL_ELISION` runs the same algorithms with serial loop execution. It keeps
@@ -13,7 +43,7 @@ caller experiments still create their explicitly requested caller threads.
 The PBBS driver separately provides eight original implementations with
 `--backend serial --mode SERIAL`; those always execute with one worker.
 
-Use `input_graphs.py --kind rmat24 --smoke --output <directory>` to build the
+Use `tools/input_graphs.py --kind rmat24 --smoke --output <directory>` to build the
 pinned PBBS generator and produce a validated small graph. Omit `--smoke` for
 the full RMat24/RMat27 recipe; random-local and cube-grid recipes support
 `--size small|large`. These are PBBS recipes, not assertions of byte identity
@@ -30,9 +60,9 @@ combined with `--cpu-node`, though explicit memory placement is supported.
 An unavailable collector or missing output fails the run without marking it
 complete. Optional PAPI callback instrumentation is available with
 `-DOOX_SCHEDULER_EVAL_PAPI=ON` and `--papi-events`; useful-work utilization is
-still unmeasured. See the scope and limitations in `DATASETS_AND_PAPI.md`.
+still unmeasured. See the scope and limitations in `docs/DATASETS_AND_PAPI.md`.
 The wrapper follows the [official LIKWID interface](https://github.com/RRZE-HPC/likwid/blob/master/doc/likwid-perfctr.1).
-See [historical inputs and baseline runners](HISTORICAL_BASELINES.md) for pinned
+See [historical inputs and baseline runners](docs/HISTORICAL_BASELINES.md) for pinned
 PASL commands and revision-checked historical executable integration.
 
 Native sample sort now includes string and 64-bit record cases (records use
@@ -74,7 +104,7 @@ and available OpenMP schedules through one shared workload layer.
 
 The historical thesis repository is pinned as optional reference material at
 `thirdparty/composable-parallel-scheduler-thesis`. The runner never clones or
-downloads it. See `PROVENANCE.md` for the clean-room implementation policy and
+downloads it. See `docs/PROVENANCE.md` for the clean-room implementation policy and
 the intentional differences from that source.
 
 ## Build and verify
@@ -137,7 +167,7 @@ Inputs are deterministic and construction and validation stay outside measured
 regions. A full SpMV run intentionally has the same large scale as the research
 workload and can require several gigabytes; use `--smoke` before a full run.
 Adaptive BFS uses SPTL's κ/α estimator rule with its 20 µs and 1.8 defaults;
-see `THIRDPARTY.md` for the retained MIT notice.
+see `docs/THIRDPARTY.md` for the retained MIT notice.
 
 Eigen benchmark JSON includes scheduled/executed tasks, successful steals,
 failed steal rounds, worker sleeps, and observed sleeping time. BFS additionally
@@ -234,11 +264,11 @@ families, fit the warm task-publication, useful-work, and residual-load-imbalanc
 terms, and report separately observed cold initialization with:
 
 ```sh
-python3 benchmarks/scheduler_eval/model.py results/scheduler_eval/<result>
+python3 benchmarks/scheduler_eval/tools/model.py results/scheduler_eval/<result>
 ```
 
 The command adds model parameters, per-case predictions, initialization
 amortization, and an observed-versus-predicted SpMV plot to that result. The
 research lineage, publication-time estimator, parameter-selection procedure,
 published foundations, limitations, and next measurements are in
-[*Estimating Rapid Start and choosing scheduler parameters*](PERFORMANCE_MODEL.md).
+[*Estimating Rapid Start and choosing scheduler parameters*](docs/PERFORMANCE_MODEL.md).

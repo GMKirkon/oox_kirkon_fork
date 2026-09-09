@@ -4,12 +4,15 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import sys
 import struct
 import tempfile
 import unittest
 from unittest.mock import patch
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from datasets import CATALOG, acquire, copy_stream, graph_dimensions
+
 
 
 class DatasetTests(unittest.TestCase):

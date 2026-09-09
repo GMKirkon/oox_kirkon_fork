@@ -5,7 +5,7 @@ hardware experiments or building historical runtimes is explicitly excluded.
 
 ## Original data
 
-`original_datasets.json` records original dataset identities, not substitutes:
+[`data/original_datasets.json`](../data/original_datasets.json) records original dataset identities, not substitutes:
 
 - Seven text/mesh archives are in the pinned PBBS checkout. Their compressed
   SHA-256 values are pinned in the catalogue. Acquisition verifies each archive,
@@ -20,9 +20,9 @@ hardware experiments or building historical runtimes is explicitly excluded.
   payload SHA-256, but does not claim local DAG verification.
 
 ```sh
-python3 benchmarks/scheduler_eval/datasets.py --bundled
-python3 benchmarks/scheduler_eval/datasets.py --dataset w3c2
-python3 benchmarks/scheduler_eval/datasets.py --dataset livejournal --dataset twitter \
+python3 benchmarks/scheduler_eval/tools/datasets.py --bundled
+python3 benchmarks/scheduler_eval/tools/datasets.py --dataset w3c2
+python3 benchmarks/scheduler_eval/tools/datasets.py --dataset livejournal --dataset twitter \
   --dataset wikipedia --dataset europe --ipfs /path/to/ipfs
 ```
 

@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "../rapid_start.h"
+#include "../../rapid_start.h"
 #include "benchmarks/eigen/num_threads.h"
 #include "benchmarks/eigen/tbb_pinner.h"
 #include "benchmarks/eigen/thread_index.h"

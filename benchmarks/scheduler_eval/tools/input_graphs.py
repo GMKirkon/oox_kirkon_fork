@@ -57,7 +57,7 @@ def validate_graph(path):
 
 
 def main():
-    root = Path(__file__).resolve().parents[2]
+    root = Path(__file__).resolve().parents[3]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kind", choices=KINDS, required=True)
     parser.add_argument("--size", choices=("small", "large"), default="small")

@@ -13,8 +13,11 @@ import socket
 import subprocess
 import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "tools"))
+
 import hardware
 import datasets
+import provenance
 
 
 def capture(command, cwd):
@@ -187,6 +190,14 @@ def main():
     raw.mkdir(parents=True, exist_ok=True)
     traces.mkdir(parents=True, exist_ok=True)
     cache = cmake_cache(args.build.resolve())
+    measured_paths = [executable_dir / f"{prefix}_{mode}"
+                      for mode in modes
+                      for prefix in ("bench_scheduler_eval", "scheduling_dist", "trace_spin")]
+    tuner_path = executable_dir / "timespan_tuner_EIGEN_STEALING"
+    if "EIGEN_STEALING" in modes and tuner_path.exists():
+        measured_paths.append(tuner_path)
+    binary_records = provenance.artifacts(measured_paths)
+    env = provenance.execution_environment(os.environ)
     compiler = cache.get("CMAKE_CXX_COMPILER", "unavailable")
     try:
         compiler_version = capture([compiler, "--version"], root).splitlines()[0]
@@ -217,6 +228,10 @@ def main():
         "execution_threads_by_mode": {
             mode: 1 if mode == "SERIAL_ELISION" else args.threads for mode in modes},
         "oox_commit": revision(root),
+        "checkout": provenance.checkout(root),
+        "binary_source_revision": None,
+        "executables": binary_records,
+        "placement_policy": "shared inherited CPU set; no per-worker pinning; optional --cpu-node restriction",
         "thesis_commit": revision(root, "thirdparty/composable-parallel-scheduler-thesis"),
         "pbbs_commit": revision(root, "thirdparty/pbbsbench"),
         "build_directory": str(args.build.resolve()),
@@ -226,9 +241,9 @@ def main():
         "cxx_flags": cache.get("CMAKE_CXX_FLAGS", ""),
         "allocator": cache.get("OOX_ALLOCATOR", "unspecified"),
         "environment": {
-            "KMP_AFFINITY": os.environ.get("KMP_AFFINITY", "unspecified"),
-            "OMP_PROC_BIND": os.environ.get("OMP_PROC_BIND", "unspecified"),
-            "OMP_PLACES": os.environ.get("OMP_PLACES", "unspecified"),
+            "KMP_AFFINITY": env["KMP_AFFINITY"],
+            "OMP_PROC_BIND": env["OMP_PROC_BIND"],
+            "OMP_PLACES": env.get("OMP_PLACES", "unspecified"),
         },
         "numa_command": placement,
         "perf_events": args.perf_events.split(",") if args.perf else [],
@@ -243,7 +258,6 @@ def main():
         if dataset_record and metadata["graph_sha256"] != dataset_record["sha256"]:
             raise ValueError("original dataset payload checksum mismatch")
     (output / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
-    env = os.environ.copy()
     if args.papi_events:
         env["OOX_EVAL_PAPI_EVENTS"] = args.papi_events
     else:
@@ -295,8 +309,10 @@ def main():
                   "2" if args.smoke else "10000"],
                  raw / "timespan_tuner_EIGEN_STEALING.json", env, args.timeout)
     write_heartbeat_comparison(raw, output, modes)
+    if provenance.artifacts(measured_paths) != binary_records:
+        raise RuntimeError("benchmark executables changed during the run")
     if not args.no_plot:
-        subprocess.run([sys.executable, str(Path(__file__).with_name("plot.py")),
+        subprocess.run([sys.executable, str(Path(__file__).parent / "tools" / "plot.py"),
                         str(output)], check=True, timeout=args.timeout)
     metadata["complete"] = True
     (output / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")

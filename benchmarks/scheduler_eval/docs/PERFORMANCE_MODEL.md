@@ -426,7 +426,7 @@ $$
 $$
 
 The 2023 thesis describes 10,000 measured launches; the English draft says
-$10^5$. OOX's [current tuner](timespan_tuner.cpp) defaults to 10,000 after ten
+$10^5$. OOX's [current tuner](../probes/timespan_tuner.cpp) defaults to 10,000 after ten
 warm-ups. It uses the non-adaptive Eigen baseline, so it estimates
 $G_{\text{Eigen},P,z}$. The rule is an empirical service-level heuristic: under a
 stationary repeat of the calibrated regime, about 99% of launches are expected to
@@ -777,8 +777,8 @@ tuner probe.
    failed probes, proxy wins, generated grains, cache misses, or worker core class.
 
 There is also a timespan-unit mismatch to resolve. On AArch64,
-[`Now()`](../eigen/util.h) returns raw `CNTVCT_EL0` ticks and
-[`INIT_TIME=1800`](../eigen/timespan_partitioner.h) is therefore a tick
+[`Now()`](../../eigen/util.h) returns raw `CNTVCT_EL0` ticks and
+[`INIT_TIME=1800`](../../eigen/timespan_partitioner.h) is therefore a tick
 count. The tuner emits wall-clock nanoseconds. This run reports a 24 MHz counter,
 making 1800 ticks about 75 us, while the tuner p99 is 20.8955 ms. Those values
 cannot be substituted for one another without reading `CNTFRQ_EL0` and converting
@@ -791,7 +791,7 @@ After a complete non-smoke evaluation containing Rapid Start, at least three
 `Launch` sizes, and the SpMV families:
 
 ```sh
-python3 benchmarks/scheduler_eval/model.py \
+python3 benchmarks/scheduler_eval/tools/model.py \
   results/scheduler_eval/<result-directory>
 ```
 

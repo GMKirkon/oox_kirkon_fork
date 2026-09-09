@@ -58,24 +58,40 @@ jobs:
 
   scheduler-eval:
     runs-on: ubuntu-latest
+    env:
+      BENCH_NUM_THREADS: "2"
+    strategy:
+      fail-fast: false
+      matrix:
+        external-backends: ["OFF", "ON"]
     steps:
     - uses: actions/checkout@v5
     - name: Dependencies
-      run: sudo apt update && sudo apt install cmake clang-19 libbenchmark-dev
+      run: sudo apt update && sudo apt install cmake clang-19 libbenchmark-dev libtbb-dev libomp-19-dev
     - name: Configure scheduler evaluations
       run: >
         cmake -S . -B build-scheduler-eval
         -DCMAKE_CXX_COMPILER=clang++-19
         -DOOX_BUILD_TESTS=OFF -DOOX_BUILD_BENCHMARKS=ON
         -DOOX_BUILD_TASKBENCH=OFF -DOOX_BUILD_SCHEDULER_EVALS=ON
-        -DOOX_ENABLE_TBB=OFF -DOOX_ENABLE_TF=OFF
-        -DOOX_ENABLE_FOLLY=OFF -DOOX_ENABLE_OMP=OFF
+        -DOOX_ENABLE_TBB=${{ matrix.external-backends }} -DOOX_ENABLE_TF=OFF
+        -DOOX_ENABLE_FOLLY=OFF -DOOX_ENABLE_OMP=${{ matrix.external-backends }}
+        -DOOX_EIGEN_THREADS=2
     - name: Build scheduler evaluations
-      run: cmake --build build-scheduler-eval -j 8
+      run: cmake --build build-scheduler-eval --target scheduler_eval_all -j 8
     - name: Test scheduler evaluations
+      env:
+        OMP_PROC_BIND: "false"
+        KMP_AFFINITY: "disabled"
       run: >
-        python3 benchmarks/scheduler_eval/ctest_ci.py
-        --test-dir build-scheduler-eval --output-on-failure -L scheduler-eval
+        python3 benchmarks/scheduler_eval/tools/ctest_ci.py
+        --test-dir build-scheduler-eval --output-on-failure -L scheduler-eval --timeout 120
+    - name: Require external backend targets
+      if: matrix.external-backends == 'ON'
+      run: >
+        cmake --build build-scheduler-eval --target
+        bench_scheduler_eval_TBB_SIMPLE bench_scheduler_eval_RAPID_START
+        bench_scheduler_eval_OMP_STATIC -j 8
 
   build:
     runs-on: ${{ matrix.os }}

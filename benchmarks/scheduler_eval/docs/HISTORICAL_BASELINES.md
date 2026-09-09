@@ -10,7 +10,7 @@ distinct from original generated files.
 Inspect a command without a checkout or large allocation:
 
 ```sh
-python3 benchmarks/scheduler_eval/paper_graphs.py --kind trees-524k \
+python3 benchmarks/scheduler_eval/tools/paper_graphs.py --kind trees-524k \
   --size large --pasl /path/to/pasl --plan
 ```
 
@@ -22,7 +22,7 @@ For those three kinds the tool requires a checkout at that revision instead.
 Its RMat presets derive vertex counts from the load budget: the large preset
 requests 13,333,333 vertices and 119,999,997 edges for both labels, with different
 quadrant probabilities. The names must not be interpreted as literal 2^24 and
-2^27 sizes; `input_graphs.py` provides separately labeled PBBS recipes for those
+2^27 sizes; `tools/input_graphs.py` provides separately labeled PBBS recipes for those
 literal sizes. The exact artifact dataset still needs provenance verification.
 Real data remains externally
 supplied; this tool does not download it or assert dataset licensing.
@@ -56,11 +56,11 @@ Missing timing, non-finite metrics, process failures and timeouts never produce
 a completed result.
 
 ```sh
-python3 benchmarks/scheduler_eval/baselines.py --baseline heartbeat \
+python3 benchmarks/scheduler_eval/tools/baselines.py --baseline heartbeat \
   --checkout /path/to/heartbeat --executable /path/to/heartbeat/bench/merge.log \
   --output results/heartbeat-merge -- -algorithm heartbeat -n 10000000 -proc 2
 
-python3 benchmarks/scheduler_eval/baselines.py --baseline pbbs-sptl \
+python3 benchmarks/scheduler_eval/tools/baselines.py --baseline pbbs-sptl \
   --checkout /path/to/pbbs-sptl --dependency sptl=/path/to/sptl \
   --executable /path/to/pbbs-sptl/bench/bfs.sptl --output results/sptl-bfs \
   -- -library sptl -check 1 -infile /path/to/sptl-graph -source 0 -proc 2

@@ -114,7 +114,7 @@ using SpinBarrier = ::SpinBarrier;
 def task_adapter_text():
     return r'''#ifndef PARLAY_INTERNAL_SCHEDULER_PLUGINS_EIGEN_H_
 #define PARLAY_INTERNAL_SCHEDULER_PLUGINS_EIGEN_H_
-#include <benchmarks/scheduler_eval/oox_task_adapter.h>
+#include <benchmarks/scheduler_eval/runtime/oox_task_adapter.h>
 #ifndef OOX_PBBS_TASK_GRAIN
 #define OOX_PBBS_TASK_GRAIN 1024
 #endif
@@ -227,7 +227,7 @@ def select_backend(source: Path, backend: str):
                 "  // The OOX adapter initializes its own pool without a slot barrier.",
             ))
             initialization.write_text(
-                '#pragma once\n#include <benchmarks/scheduler_eval/oox_task_adapter.h>\n'
+                '#pragma once\n#include <benchmarks/scheduler_eval/runtime/oox_task_adapter.h>\n'
                 'namespace parlay::internal {\n'
                 'struct InitOnce { template <typename F> InitOnce(F&& f) { f(); } };\n'
                 'struct SpinBarrier { std::atomic<size_t> remaining;\n'

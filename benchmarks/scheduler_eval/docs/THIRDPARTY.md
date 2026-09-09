@@ -2,8 +2,8 @@
 
 ## PASL graph topologies and parameter formulas
 
-The `Pasl*` branches in `graph_workloads.cpp` and the parameter formulas in
-`paper_graphs.py` adapt `graph/include/graphgenerators.hpp` and
+The `Pasl*` branches in `workloads/graph_workloads.cpp` and the parameter formulas in
+`tools/paper_graphs.py` adapt `graph/include/graphgenerators.hpp` and
 `graph/bench/graph.ml` from PASL commit
 `d3ed9488cea5a8d35b9a86b4408e0f6f9211413b`.
 The SC15 trunk-first and RMat formulas additionally use
@@ -20,7 +20,7 @@ permutation. No PASL runtime source is vendored here.
 
 ## Deepsea SPTL granularity estimator
 
-`granularity_control.{h,cpp}` adapts the estimator rule from
+`workloads/granularity_control.{h,cpp}` adapts the estimator rule from
 `deepsea-inria/sptl` commit `911bc7af7c658020138a08d4923224332b08a27f`.
 
 MIT License

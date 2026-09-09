@@ -16,7 +16,7 @@ import urllib.request
 
 from paper_graphs import digest
 
-CATALOG = json.loads(Path(__file__).with_name("original_datasets.json").read_text())
+CATALOG = json.loads((Path(__file__).resolve().parents[1] / "data" / "original_datasets.json").read_text())
 
 
 def graph_dimensions(path):
@@ -123,7 +123,7 @@ def acquire(name, entry, output, pbbs, gateways, ipfs, timeout, limit):
 
 
 def main():
-    root = Path(__file__).resolve().parents[2]
+    root = Path(__file__).resolve().parents[3]
     parser = argparse.ArgumentParser(description=__doc__)
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--dataset", action="append", choices=CATALOG["datasets"])

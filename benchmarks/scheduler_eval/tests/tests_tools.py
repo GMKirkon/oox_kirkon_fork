@@ -2,15 +2,51 @@
 """Independent fixtures for historical command plans and metric ingestion."""
 import unittest
 from pathlib import Path
+import sys
+import tempfile
+from unittest.mock import patch
 from types import SimpleNamespace
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from baselines import parse_metrics
 from paper_graphs import parameters
 from input_graphs import recipe, validate_graph
 import hardware
+import provenance
 
 
 class HistoricalToolsTest(unittest.TestCase):
+    def test_execution_environment_disables_backend_specific_pinning(self):
+        original = dict(OMP_PROC_BIND="close", KMP_AFFINITY="compact",
+                        GOMP_CPU_AFFINITY="0", KMP_HW_SUBSET="1c", KEEP="yes")
+        result = provenance.execution_environment(original)
+        self.assertEqual(result, dict(OMP_PROC_BIND="false",
+                                     KMP_AFFINITY="disabled", KEEP="yes"))
+        self.assertEqual(original["OMP_PROC_BIND"], "close")
+
+    def test_artifact_identity_changes_with_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "benchmark"
+            binary.write_bytes(b"abc")
+            before = provenance.artifacts([binary])
+            self.assertEqual(before[str(binary.resolve())]["sha256"],
+                             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+            binary.write_bytes(b"abd")
+            self.assertNotEqual(before, provenance.artifacts([binary]))
+            with self.assertRaises(FileNotFoundError):
+                provenance.artifacts([Path(directory) / "missing"])
+
+    def test_checkout_distinguishes_dirty_state_from_revision(self):
+        for status in (b"", b" M source.cpp\n", b"?? new.cpp\n"):
+            with self.subTest(status=status), patch(
+                    "provenance.subprocess.check_output",
+                    side_effect=[status, b"diff", b"revision\n"]):
+                record = provenance.checkout(Path("repo"))
+                self.assertEqual(record["commit"], "revision")
+                self.assertEqual(record["dirty"], bool(status))
+                self.assertEqual(record["status"], status.decode())
+
     def test_papi_options_and_scope(self):
         args = SimpleNamespace(perf=False, perf_events="cycles", cpu_node=None,
                                likwid_group=None, likwid_cpus=None,
@@ -34,7 +70,7 @@ class HistoricalToolsTest(unittest.TestCase):
         self.assertEqual(args[args.index("-m") + 1], "201326592")
         self.assertEqual(recipe("rmat27")[1][-1], "134217728")
         self.assertEqual(recipe("rmat27", smoke=True)[1][-1], "1024")
-        self.assertEqual(validate_graph(Path(__file__).with_name("graph_smoke.adj")), (4, 4))
+        self.assertEqual(validate_graph(Path(__file__).parent / "fixtures" / "graph_smoke.adj"), (4, 4))
 
     def test_likwid_wrapper_and_conflicts(self):
         args = SimpleNamespace(perf=False, perf_events="cycles", cpu_node=None,
