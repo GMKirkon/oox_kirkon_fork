@@ -3,6 +3,7 @@
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -49,6 +50,10 @@ def parse_args(root):
     parser.add_argument("--benchmark-min-time", default="0.5s")
     parser.add_argument("--filter", dest="benchmark_filter", default="")
     parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--graph", type=Path,
+                        help="PBBS AdjacencyGraph file for BfsFile cases")
+    parser.add_argument("--paper-scale", action="store_true",
+                        help="also register 100-million-element primary cases")
     parser.add_argument("--no-plot", action="store_true")
     parser.add_argument("--timeout", type=int, default=600,
                         help="maximum seconds for each subprocess")
@@ -88,9 +93,45 @@ def run_json(command, output, env, timeout):
     json.loads(output.read_text())
 
 
+def write_heartbeat_comparison(raw, output, modes):
+    units = {"ns": 1e-9, "us": 1e-6, "ms": 1e-3, "s": 1.0}
+    records = []
+    for mode in modes:
+        data = json.loads((raw / f"bench_scheduler_eval_{mode}.json").read_text())
+        if not data["benchmarks"]:
+            raise RuntimeError(f"no benchmarks matched for {mode}")
+        for case in data["benchmarks"]:
+            if case.get("run_type", "iteration") != "iteration":
+                continue
+            if case.get("error_occurred"):
+                raise RuntimeError(f"benchmark failed: {mode}/{case['name']}")
+            iterations = case.get("iterations", 1)
+            def per_iteration(name):
+                return case[name] / iterations if name in case else None
+            records.append({
+                "mode": mode,
+                "benchmark": case["name"],
+                "exectime": case["real_time"] * units[case["time_unit"]],
+                "nb_steals": per_iteration("successful_steals"),
+                "nb_promotions": per_iteration("nested_launches"),
+                "tasks": per_iteration("tasks_scheduled"),
+                "observed_sleep_ns": per_iteration("idle_time_ns"),
+                "utilization": None,
+            })
+    (output / "heartbeat_compat.json").write_text(json.dumps({
+        "schema": 1,
+        "note": "exectime is seconds per iteration; null means unmeasured. "
+                "nb_promotions denotes BFS inner-loop launches where available. "
+                "Sleeping time alone is insufficient to infer utilization.",
+        "records": records,
+    }, indent=2) + "\n")
+
+
 def main():
     root = Path(__file__).resolve().parents[2]
     args = parse_args(root)
+    if args.graph and not args.graph.is_file():
+        raise ValueError(f"graph file does not exist: {args.graph}")
     placement = placement_prefix(args)
     if args.perf and (platform.system() != "Linux" or not shutil.which("perf")):
         raise RuntimeError("--perf requires perf on Linux")
@@ -101,6 +142,13 @@ def main():
     if not modes:
         raise RuntimeError("No scheduler evaluation executables found; configure with "
                            "-DOOX_BUILD_SCHEDULER_EVALS=ON")
+    if "OOX_TASKS" in modes:
+        fixed_threads = int(cmake_cache(args.build.resolve()).get("OOX_EIGEN_THREADS", "0"))
+        actual_threads = fixed_threads or (os.cpu_count() or 1)
+        if actual_threads != args.threads:
+            raise ValueError(
+                f"OOX_TASKS has {actual_threads} workers; configure "
+                f"-DOOX_EIGEN_THREADS={args.threads} for this comparison")
     timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     output = (args.output or root / "results/scheduler_eval" /
               f"{timestamp}_{socket.gethostname()}").resolve()
@@ -114,7 +162,8 @@ def main():
         compiler_version = capture([compiler, "--version"], root).splitlines()[0]
     except (OSError, subprocess.CalledProcessError):
         compiler_version = "unavailable"
-    benchmark_filter = "Launch/64" if args.smoke else args.benchmark_filter
+    benchmark_filter = ((args.benchmark_filter or "Launch/64") if args.smoke
+                        else args.benchmark_filter)
     benchmark_min_time = "0.01s" if args.smoke else args.benchmark_min_time
     metadata = {
         "schema": 1,
@@ -130,6 +179,8 @@ def main():
         "benchmark_min_time": benchmark_min_time,
         "subprocess_timeout_seconds": args.timeout,
         "smoke": args.smoke,
+        "graph_file": str(args.graph.resolve()) if args.graph else None,
+        "paper_scale": args.paper_scale,
         "modes": modes,
         "oox_commit": revision(root),
         "thesis_commit": revision(root, "thirdparty/composable-parallel-scheduler-thesis"),
@@ -148,8 +199,18 @@ def main():
         "numa_command": placement,
         "perf_events": args.perf_events.split(",") if args.perf else [],
     }
+    if args.graph:
+        digest = hashlib.sha256()
+        with args.graph.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        metadata["graph_sha256"] = digest.hexdigest()
     (output / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
     env = os.environ.copy()
+    if args.graph:
+        env["OOX_BENCH_GRAPH"] = str(args.graph.resolve())
+    if args.paper_scale:
+        env["OOX_BENCH_PAPER_SCALE"] = "1"
     env["BENCH_NUM_THREADS"] = str(args.threads)
     env["OMP_NUM_THREADS"] = str(args.threads)
     env["PARLAY_NUM_THREADS"] = str(args.threads)
@@ -188,6 +249,7 @@ def main():
         run_json(placement + [str(tuner), "--iterations",
                   "2" if args.smoke else "10000"],
                  raw / "timespan_tuner_EIGEN_STEALING.json", env, args.timeout)
+    write_heartbeat_comparison(raw, output, modes)
     if not args.no_plot:
         subprocess.run([sys.executable, str(Path(__file__).with_name("plot.py")),
                         str(output)], check=True, timeout=args.timeout)

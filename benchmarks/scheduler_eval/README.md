@@ -1,5 +1,31 @@
 # Native scheduler evaluation
 
+See [the porting-plan status](PLAN_STATUS.md) for the remaining gaps versus the
+original full reproduction plan.
+
+The suite also builds `OOX_TASKS`, which expresses parallel ranges as recursive
+`oox::run` tasks joined through `oox::var`. It reads counters from OOX's actual
+pool. Its thread count is the library's build setting `OOX_EIGEN_THREADS`
+(zero means detected hardware concurrency); configure that value to match the
+runner's `--threads` for cross-mode comparisons.
+Automatic OOX task grains target eight ranges per worker, capped at 1,024
+iterations per leaf; explicit grain requests are retained. This grain policy
+is distinct from the low-level Eigen policies and must be accounted for when
+interpreting task counts.
+
+Additional cases include frontier-parallel QuickHull, atomic string deduplication
+on synthetic word triples, eight-pass 64-bit radix sort, concurrent callers, and
+workers temporarily occupied by controlled tasks. Radix `preflight_pass_*_ns`
+counters describe an untimed instrumented invocation; ordinary benchmark timing
+does not include that instrumentation. QuickHull uses long-double orientation
+arithmetic and reports partition depth, so its floating-point boundary behavior
+can differ from PBBS's double-precision implementation.
+
+Use `--graph /path/to/graph.adj_bin --filter BfsFile` to benchmark a supplied
+PASL binary or PBBS `AdjacencyGraph` text file. Loading and serial validation
+occur outside timing; the runner records the graph path and SHA-256. Add
+`--paper-scale` to register 100-million-element primary cases explicitly.
+
 This directory is OOX's offline, reproducible implementation of the evaluation
 families studied in *Fast work distribution for composable task scheduling
 engines*. It compares ordinary work stealing, proactive mailbox publication,
@@ -22,7 +48,7 @@ cmake -S . -B build-eval -G Ninja \
   -DOOX_BUILD_TASKBENCH=OFF \
   -DOOX_BUILD_SCHEDULER_EVALS=ON
 cmake --build build-eval --target scheduler_eval_all -j
-ctest --test-dir build-eval -R scheduler_eval --output-on-failure
+ctest --test-dir build-eval -L scheduler-eval --output-on-failure
 ```
 
 CMake includes only installed/enabled backends. Eigen contributes

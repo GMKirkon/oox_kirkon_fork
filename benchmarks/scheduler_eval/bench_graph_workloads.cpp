@@ -6,6 +6,8 @@
 #include <benchmark/benchmark.h>
 
 #include <chrono>
+#include <cstdlib>
+#include <fstream>
 #include <vector>
 
 namespace {
@@ -66,5 +68,42 @@ REGISTER_BFS(Rmat);
 REGISTER_BFS(SquareGrid);
 REGISTER_BFS(CubeGrid);
 REGISTER_BFS(SmallWorld);
+
+template <BfsPolicy Policy> void BfsFile(benchmark::State &state) {
+  std::ifstream input(std::getenv("OOX_BENCH_GRAPH"), std::ios::binary);
+  scheduler_eval::CsrGraph graph;
+  try {
+    graph = scheduler_eval::ReadAdjacencyGraph(input);
+  } catch (const std::exception &error) {
+    state.SkipWithError(error.what());
+    return;
+  }
+  const auto expected = scheduler_eval::BfsSerial(graph);
+  const auto run = [&] {
+    if constexpr (Policy == BfsPolicy::Flat)
+      return scheduler_eval::BfsFlat(graph);
+    else if constexpr (Policy == BfsPolicy::Fixed)
+      return scheduler_eval::BfsNested(graph, 64);
+    else
+      return scheduler_eval::BfsAdaptive(graph, std::chrono::microseconds(20));
+  };
+  if (run() != expected) {
+    state.SkipWithError("file BFS differs from serial levels");
+    return;
+  }
+  scheduler_eval::SchedulerMetricsScope metrics(state);
+  for (auto _ : state)
+    benchmark::DoNotOptimize(run());
+  state.SetItemsProcessed(state.iterations() * graph.edges.size());
+}
+
+const bool file_registered = [] {
+  if (std::getenv("OOX_BENCH_GRAPH")) {
+    benchmark::RegisterBenchmark("BfsFile/Flat", BfsFile<BfsPolicy::Flat>)->UseRealTime();
+    benchmark::RegisterBenchmark("BfsFile/Fixed", BfsFile<BfsPolicy::Fixed>)->UseRealTime();
+    benchmark::RegisterBenchmark("BfsFile/Adaptive", BfsFile<BfsPolicy::Adaptive>)->UseRealTime();
+  }
+  return true;
+}();
 
 } // namespace

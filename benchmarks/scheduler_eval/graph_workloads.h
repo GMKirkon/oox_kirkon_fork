@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <iosfwd>
 #include <vector>
 
 namespace scheduler_eval {
@@ -40,6 +41,7 @@ struct CsrGraph {
 };
 
 CsrGraph MakeGraph(GraphKind kind, std::size_t scale);
+CsrGraph ReadAdjacencyGraph(std::istream &input);
 std::vector<int> BfsSerial(const CsrGraph &graph);
 std::vector<int> BfsFlat(const CsrGraph &graph);
 std::vector<int> BfsNested(const CsrGraph &graph, std::size_t edge_cutoff,

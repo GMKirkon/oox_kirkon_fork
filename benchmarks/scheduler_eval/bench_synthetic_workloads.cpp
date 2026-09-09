@@ -52,6 +52,86 @@ void CompetingLoops(benchmark::State &state) {
   state.SetItemsProcessed(state.iterations() * costs.size() * 2);
 }
 
+void OversubscribedLoops(benchmark::State &state) {
+  const auto costs = scheduler_eval::MakeIterationCosts(
+      scheduler_eval::CostKind::Clustered, state.range(0));
+  const auto clients = static_cast<std::size_t>(state.range(1));
+  const auto expected = scheduler_eval::RunCostLoopSerial(costs);
+  scheduler_eval::SchedulerMetricsScope metrics(state);
+  for (auto _ : state) {
+    std::vector<std::uint64_t> results(clients);
+    std::vector<std::thread> callers;
+    for (std::size_t i = 0; i < clients; ++i)
+      callers.emplace_back([&, i] {
+        results[i] = scheduler_eval::RunCostLoop(costs);
+      });
+    for (auto &caller : callers)
+      caller.join();
+    if (!std::all_of(results.begin(), results.end(),
+                     [&](auto result) { return result == expected; }))
+      state.SkipWithError("concurrent loops differ from serial checksum");
+    benchmark::DoNotOptimize(results.data());
+  }
+  state.SetItemsProcessed(state.iterations() * clients * costs.size());
+}
+
+#if defined(EIGEN_MODE) || defined(OOX_TASK_MODE)
+void ChangingWorkerAvailability(benchmark::State &state) {
+#ifdef OOX_TASK_MODE
+  auto &pool = oox::internal::get_eigen_pool();
+#else
+  auto &pool = EigenPool();
+#endif
+  const auto unavailable = pool.NumThreads() / 2;
+  if (pool.NumThreads() < 2) {
+    state.SkipWithError("worker availability requires at least two workers");
+    return;
+  }
+  const auto costs = scheduler_eval::MakeIterationCosts(
+      scheduler_eval::CostKind::PhaseChanging, state.range(0));
+  const auto expected = scheduler_eval::RunCostLoopSerial(costs);
+  scheduler_eval::SchedulerMetricsScope metrics(state);
+  for (auto _ : state) {
+    state.PauseTiming();
+    std::atomic<std::size_t> started{0}, finished{0};
+    std::atomic<bool> release{false};
+    for (std::size_t i = 0; i < unavailable; ++i)
+      pool.Schedule(oox::detail::eigen_pool::MakeTask([&] {
+        started.fetch_add(1);
+        while (!release.load())
+          std::this_thread::yield();
+        finished.fetch_add(1);
+      }));
+    while (started.load() != unavailable)
+      std::this_thread::yield();
+    state.ResumeTiming();
+    // Workers return during the loop; a separate controller ensures progress.
+    std::thread controller([&] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      release.store(true);
+    });
+    const auto result = scheduler_eval::RunCostLoop(costs);
+    controller.join();
+    while (finished.load() != unavailable)
+      std::this_thread::yield();
+    if (result != expected)
+      state.SkipWithError("availability loop differs from serial checksum");
+    benchmark::DoNotOptimize(result);
+  }
+  state.counters["temporarily_unavailable_workers"] = unavailable;
+  state.SetItemsProcessed(state.iterations() * costs.size());
+}
+
+BENCHMARK(ChangingWorkerAvailability)
+    ->Arg(1 << 12)->Arg(1 << 18)->UseRealTime();
+#endif
+
+#ifndef RAPID_START_MODE
+BENCHMARK(OversubscribedLoops)
+    ->Args({1 << 12, 2})->Args({1 << 12, 4})->Args({1 << 12, 8})
+    ->UseRealTime();
+#endif
+
 template <bool ParallelTouch> void FirstTouch(benchmark::State &state) {
   scheduler_eval::SchedulerMetricsScope metrics(state);
   std::vector<std::uint64_t> data(state.range(0)), output(data.size());
@@ -69,10 +149,12 @@ template <bool ParallelTouch> void FirstTouch(benchmark::State &state) {
   state.SetBytesProcessed(state.iterations() * data.size() * sizeof(data[0]));
 }
 
+#ifndef RAPID_START_MODE
 BENCHMARK(CompetingLoops)
     ->RangeMultiplier(4)
     ->Range(1 << 10, 1 << 18)
     ->UseRealTime();
+#endif
 BENCHMARK_TEMPLATE(FirstTouch, false)
     ->RangeMultiplier(4)
     ->Range(1 << 14, 1 << 24)

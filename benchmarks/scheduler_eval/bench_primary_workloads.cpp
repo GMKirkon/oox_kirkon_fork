@@ -7,6 +7,18 @@
 
 namespace {
 
+void PrimarySizes(benchmark::internal::Benchmark *benchmark) {
+  if (std::getenv("OOX_BENCH_PAPER_SCALE"))
+    benchmark->Arg(100000000);
+}
+
+void PassTimes(benchmark::State &state,
+               const scheduler_eval::RadixSortMetrics &metrics) {
+  for (std::size_t i = 0; i < metrics.pass_nanoseconds.size(); ++i)
+    state.counters["preflight_pass_" + std::to_string(i) + "_ns"] =
+        metrics.pass_nanoseconds[i];
+}
+
 template <scheduler_eval::PointKind Kind>
 void ConvexHull(benchmark::State &state) {
   const auto points = scheduler_eval::MakePoints(Kind, state.range(0));
@@ -49,6 +61,7 @@ void RadixSort(benchmark::State &state) {
   for (auto _ : state)
     benchmark::DoNotOptimize(scheduler_eval::RadixSortParallel(keys));
   state.counters["radix_passes"] = workload_metrics.passes;
+  PassTimes(state, workload_metrics);
   state.SetItemsProcessed(state.iterations() * keys.size());
 }
 
@@ -62,6 +75,7 @@ void RadixSortPairs(benchmark::State &state) {
   for (auto _ : state)
     benchmark::DoNotOptimize(scheduler_eval::RadixSortPairsParallel(pairs));
   state.counters["radix_passes"] = workload_metrics.passes;
+  PassTimes(state, workload_metrics);
   state.SetItemsProcessed(state.iterations() * pairs.size());
 }
 
@@ -86,12 +100,14 @@ void SampleSort(benchmark::State &state) {
   BENCHMARK_TEMPLATE(ConvexHull, scheduler_eval::PointKind::kind)              \
       ->RangeMultiplier(4)                                                     \
       ->Range(1 << 10, 1 << 18)                                                \
+      ->Apply(PrimarySizes)                                                    \
       ->UseRealTime()
 
 #define REGISTER_KEYS(benchmark_name, kind)                                    \
   BENCHMARK_TEMPLATE(benchmark_name, scheduler_eval::KeyKind::kind)            \
       ->RangeMultiplier(4)                                                     \
       ->Range(1 << 10, 1 << 18)                                                \
+      ->Apply(PrimarySizes)                                                    \
       ->UseRealTime()
 
 REGISTER_POINT(UniformSquare);

@@ -14,6 +14,14 @@ on:
 jobs:
   pbbs-applications:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: oox
+            mode: EIGEN_STEALING
+          - backend: oox-tasks
+            mode: OOX_TASKS
     steps:
     - uses: actions/checkout@v5
     - name: Dependencies
@@ -25,7 +33,7 @@ jobs:
       run: >
         python3 benchmarks/pbbs/run.py --ci-smoke --timeout 900
         --output cmake-build-pbbs/ci-smoke-results
-        --backend oox --mode EIGEN_STEALING --threads 2
+        --backend ${{ matrix.backend }} --mode ${{ matrix.mode }} --threads 2
         --compiler clang++-19
 
   scheduler-eval:

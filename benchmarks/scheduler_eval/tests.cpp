@@ -5,6 +5,7 @@
 #include "granularity_control.h"
 #include "graph_workloads.h"
 #include "primary_workloads.h"
+#include "extended_workloads.h"
 #include "synthetic_workloads.h"
 #include "workloads.h"
 
@@ -19,6 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <sstream>
 #include <vector>
 
 namespace {
@@ -59,6 +61,48 @@ bool CheckSpmv() {
 
 #ifdef SCHEDULER_EVAL_HAS_NESTED_BFS
 bool CheckBfs() {
+  std::istringstream input("AdjacencyGraph 4 4 0 2 3 4 1 2 3 3");
+  const auto loaded = scheduler_eval::ReadAdjacencyGraph(input);
+  if (scheduler_eval::BfsSerial(loaded) != std::vector<int>{0, 1, 1, 2} ||
+      scheduler_eval::BfsFlat(loaded) != std::vector<int>{0, 1, 1, 2})
+    return false;
+  for (const auto bytes : {4u, 8u}) {
+    for (const auto little : {false, true}) {
+      std::string binary;
+      const auto append = [&](std::uint64_t value, unsigned width) {
+        for (unsigned i = 0; i < width; ++i)
+          binary.push_back(static_cast<char>(value >>
+              (8 * (little ? i : width - 1 - i))));
+      };
+      for (auto value : {std::uint64_t{0xdeadbeef}, std::uint64_t{bytes * 8},
+                         std::uint64_t{4}, std::uint64_t{4}, std::uint64_t{0}})
+        append(value, 8);
+      for (auto value : {0u, 2u, 3u, 4u, 4u, 1u, 2u, 3u, 3u})
+        append(value, bytes);
+      std::istringstream stream(binary);
+      const auto graph = scheduler_eval::ReadAdjacencyGraph(stream);
+      if (graph.offsets != loaded.offsets || graph.edges != loaded.edges)
+        return false;
+      binary.pop_back();
+      std::istringstream truncated(binary);
+      try {
+        scheduler_eval::ReadAdjacencyGraph(truncated);
+        return false;
+      } catch (const std::runtime_error &) {
+      }
+    }
+  }
+  for (const auto *invalid : {"bad 0 0", "AdjacencyGraph 1 0 1",
+                             "AdjacencyGraph 2 1 0 0 2",
+                             "AdjacencyGraph 1 1 0",
+                             "AdjacencyGraph 0 0 trailing"}) {
+    std::istringstream malformed(invalid);
+    try {
+      scheduler_eval::ReadAdjacencyGraph(malformed);
+      return false;
+    } catch (const std::runtime_error &) {
+    }
+  }
   const scheduler_eval::CsrGraph empty;
   if (!scheduler_eval::BfsSerial(empty).empty() ||
       !scheduler_eval::BfsFlat(empty).empty() ||
@@ -220,6 +264,7 @@ int main() {
   ok &= Report("bfs", bfs_ok);
   ok &= Report("synthetic costs", CheckSyntheticCosts());
   ok &= Report("primary workloads", CheckPrimaryWorkloads());
+  ok &= Report("extended workloads", scheduler_eval::CheckExtendedWorkloads());
   ok &= Report("intrusive pointer ordering", CheckIntrusivePtrOrdering());
   ok &= Report("granularity estimator", CheckGranularityEstimator());
   ok &= Report("scheduler metrics", CheckSchedulerMetrics());

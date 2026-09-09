@@ -1,5 +1,19 @@
 # PBBS eigen-mailbox reproduction
 
+The additional `--backend oox-tasks --mode OOX_TASKS` adapter evaluates actual
+`oox::run`/`oox::var` task graphs for the same application suite. It compiles the
+OOX worker count from `--threads` and uses `--task-grain 1024` whenever PBBS does
+not supply a grain. Explicit PBBS grains are respected. These choices are
+visible in the retained compiler commands. OOX's pool has the requested worker
+threads; PBBS's external main thread receives one additional scratch-storage
+slot and may execute the inline branch of a fork/join. Account for that caller
+when comparing resource budgets against Eigen modes that include their main
+thread in the configured worker count.
+
+All application families remain available under this adapter. Compilation
+coverage is distinct from runtime checker coverage; the portable CI runtime
+set still excludes the pinned BFS and hull cases described below.
+
 OOX tracks the original `EgorkaZ/pbbsbench` `eigen-mailbox` experiment as the
 `thirdparty/pbbsbench` submodule, pinned at commit `396a299`. `run.py` uses that
 explicit checkout and never clones PBBS itself. It can run either the untouched

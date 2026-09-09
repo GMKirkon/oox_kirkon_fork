@@ -22,6 +22,13 @@ struct KeyValue {
   bool operator==(const KeyValue &) const = default;
 };
 
+struct KeyValue64 {
+  std::uint64_t key{};
+  std::uint64_t value{};
+
+  bool operator==(const KeyValue64 &) const = default;
+};
+
 enum class PointKind { UniformSquare, InDisk, OnCircle, Kuzmin };
 enum class KeyKind {
   Uniform,
@@ -44,6 +51,7 @@ struct DedupMetrics {
 
 struct RadixSortMetrics {
   std::size_t passes{};
+  std::vector<std::uint64_t> pass_nanoseconds;
 };
 
 struct SampleSortMetrics {
@@ -75,6 +83,14 @@ std::vector<KeyValue> RadixSortPairsSerial(std::vector<KeyValue> pairs);
 std::vector<KeyValue>
 RadixSortPairsParallel(const std::vector<KeyValue> &pairs,
                        RadixSortMetrics *metrics = nullptr);
+std::vector<std::uint64_t> MakeKeys64(KeyKind kind, std::size_t size,
+                                     std::uint64_t seed = 1);
+std::vector<std::uint64_t>
+RadixSort64Parallel(const std::vector<std::uint64_t> &keys,
+                    RadixSortMetrics *metrics = nullptr);
+std::vector<KeyValue64>
+RadixSort64PairsParallel(const std::vector<KeyValue64> &keys,
+                         RadixSortMetrics *metrics = nullptr);
 std::vector<std::uint32_t> SampleSortSerial(std::vector<std::uint32_t> keys);
 std::vector<std::uint32_t>
 SampleSortParallel(const std::vector<std::uint32_t> &keys,

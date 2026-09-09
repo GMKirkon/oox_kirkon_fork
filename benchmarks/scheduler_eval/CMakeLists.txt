@@ -4,6 +4,7 @@ set(OOX_SCHEDULER_EVAL_TESTS)
 
 if(OOX_ENABLE_EIGEN)
   list(APPEND OOX_SCHEDULER_EVAL_MODES
+    OOX_TASKS
     EIGEN_STEALING EIGEN_SHARING
     EIGEN_STEALING_GRAINSIZE EIGEN_SHARING_STEALING)
 endif()
@@ -20,7 +21,11 @@ function(oox_configure_scheduler_eval_target target mode)
   target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_compile_definitions(${target} PRIVATE
     SCHEDULER_EVAL_MODE_NAME="${mode}")
-  if(mode MATCHES "^EIGEN")
+  if(mode STREQUAL "OOX_TASKS")
+    target_compile_definitions(${target} PRIVATE
+      OOX_TASK_MODE=1 OOX_EIGEN_ENABLE_STATS=1)
+    target_link_libraries(${target} PRIVATE OOX OOX::eigen)
+  elseif(mode MATCHES "^EIGEN")
     target_compile_definitions(${target} PRIVATE
       EIGEN_MODE=${mode} OOX_EIGEN_ENABLE_STATS=1)
     target_link_libraries(${target} PRIVATE OOX OOX::eigen)
@@ -43,12 +48,13 @@ foreach(mode IN LISTS OOX_SCHEDULER_EVAL_MODES)
   add_executable(${benchmark_target} bench_scheduler_eval.cpp)
   target_sources(${benchmark_target} PRIVATE
     bench_primary_workloads.cpp primary_workloads.cpp
+    bench_extended_workloads.cpp extended_workloads.cpp
     bench_synthetic_workloads.cpp synthetic_workloads.cpp
     scheduler_metrics.cpp)
   if(NOT mode IN_LIST OOX_SCHEDULER_EVAL_NON_REENTRANT_MODES)
     target_sources(${benchmark_target} PRIVATE
       bench_scheduler_eval_nested.cpp
-      bench_graph_workloads.cpp graph_workloads.cpp granularity_control.cpp)
+      bench_graph_workloads.cpp graph_workloads.cpp graph_io.cpp granularity_control.cpp)
   endif()
   oox_configure_scheduler_eval_target(${benchmark_target} ${mode})
   target_link_libraries(${benchmark_target} PRIVATE benchmark::benchmark)
@@ -56,6 +62,16 @@ foreach(mode IN LISTS OOX_SCHEDULER_EVAL_MODES)
     --benchmark_filter=Launch/64
     --benchmark_min_time=${OOX_BENCHMARK_CTEST_MIN_TIME})
   list(APPEND OOX_SCHEDULER_EVAL_TESTS ${benchmark_target}_smoke)
+  add_test(NAME ${benchmark_target}_extended_smoke COMMAND ${benchmark_target}
+    "--benchmark_filter=(QuickHull|TrigramDedup|RadixSort64).*/1024(/|$)"
+    --benchmark_min_time=${OOX_BENCHMARK_CTEST_MIN_TIME})
+  list(APPEND OOX_SCHEDULER_EVAL_TESTS ${benchmark_target}_extended_smoke)
+  if(mode MATCHES "^EIGEN" OR mode STREQUAL "OOX_TASKS")
+    add_test(NAME ${benchmark_target}_availability_smoke COMMAND ${benchmark_target}
+      "--benchmark_filter=(ChangingWorkerAvailability/4096|OversubscribedLoops/4096/2)(/|$)"
+      --benchmark_min_time=${OOX_BENCHMARK_CTEST_MIN_TIME})
+    list(APPEND OOX_SCHEDULER_EVAL_TESTS ${benchmark_target}_availability_smoke)
+  endif()
 
   foreach(tool scheduling_dist trace_spin)
     set(tool_target ${tool}_${mode})
@@ -85,10 +101,11 @@ foreach(mode IN LISTS OOX_SCHEDULER_EVAL_MODES)
   list(APPEND OOX_SCHEDULER_EVAL_TARGETS ${test_target})
   add_executable(${test_target} tests.cpp)
   target_sources(${test_target} PRIVATE
-    primary_workloads.cpp synthetic_workloads.cpp)
+    primary_workloads.cpp synthetic_workloads.cpp
+    extended_workloads.cpp tests_extended.cpp)
   if(NOT mode IN_LIST OOX_SCHEDULER_EVAL_NON_REENTRANT_MODES)
     target_sources(${test_target} PRIVATE
-      graph_workloads.cpp granularity_control.cpp)
+      graph_workloads.cpp graph_io.cpp granularity_control.cpp)
     target_compile_definitions(${test_target} PRIVATE
       SCHEDULER_EVAL_HAS_NESTED_BFS=1)
   endif()
@@ -124,6 +141,15 @@ if(OOX_ENABLE_EIGEN AND Python3_Interpreter_FOUND)
       --smoke)
   set_tests_properties(scheduler_eval_runner_smoke PROPERTIES TIMEOUT 180)
   list(APPEND OOX_SCHEDULER_EVAL_TESTS scheduler_eval_runner_smoke)
+  add_test(NAME scheduler_eval_graph_runner_smoke
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/run.py
+      --build ${PROJECT_BINARY_DIR}
+      --output ${CMAKE_CURRENT_BINARY_DIR}/graph-runner-smoke
+      --mode EIGEN_STEALING --threads 2 --repetitions 1 --timeout 120
+      --graph ${CMAKE_CURRENT_LIST_DIR}/graph_smoke.adj
+      --filter BfsFile --smoke)
+  set_tests_properties(scheduler_eval_graph_runner_smoke PROPERTIES TIMEOUT 180)
+  list(APPEND OOX_SCHEDULER_EVAL_TESTS scheduler_eval_graph_runner_smoke)
 endif()
 
 if(TBB_FOUND AND Python3_Interpreter_FOUND)
@@ -142,5 +168,6 @@ endif()
 
 if(OOX_SCHEDULER_EVAL_TESTS)
   set_tests_properties(${OOX_SCHEDULER_EVAL_TESTS}
-    PROPERTIES LABELS scheduler-eval)
+    PROPERTIES LABELS scheduler-eval
+      FAIL_REGULAR_EXPRESSION "Failed to match any benchmarks|ERROR OCCURRED")
 endif()

@@ -36,7 +36,7 @@ CI_SMOKE_BENCHMARKS = [
     "minSpanningForest/parallelFilterKruskal",
     "spanningForest/ndST",
 ]
-BACKENDS = ["reference", "oox"]
+BACKENDS = ["reference", "oox", "oox-tasks"]
 REFERENCE_MODES = [
     "EIGEN_SIMPLE",
     "EIGEN_TIMESPAN",
@@ -103,6 +103,42 @@ using SpinBarrier = ::SpinBarrier;
 '''
 
 
+def task_adapter_text():
+    return r'''#ifndef PARLAY_INTERNAL_SCHEDULER_PLUGINS_EIGEN_H_
+#define PARLAY_INTERNAL_SCHEDULER_PLUGINS_EIGEN_H_
+#include <benchmarks/scheduler_eval/oox_task_adapter.h>
+#ifndef OOX_PBBS_TASK_GRAIN
+#define OOX_PBBS_TASK_GRAIN 1024
+#endif
+namespace parlay {
+// PBBS's main thread also uses worker-specific scratch storage.
+inline size_t num_workers() { return static_cast<size_t>(GetNumThreads()) + 1; }
+inline size_t worker_id() {
+  const auto id = GetThreadIndex();
+  return id < 0 ? num_workers() - 1 : static_cast<size_t>(id);
+}
+template <typename F>
+inline void parallel_for(size_t first, size_t last, F&& f, long grain, bool) {
+  ParallelFor(first, last, std::forward<F>(f),
+              grain > 0 ? grain : OOX_PBBS_TASK_GRAIN);
+}
+template <typename L, typename R>
+inline void par_do(L&& left, R&& right, bool) {
+  auto task = oox::run([&] { left(); return 0; });
+  right();
+  static_cast<void>(oox::wait_and_get(task));
+}
+inline void init_plugin_internal() { InitParallel(GetNumThreads()); }
+template <typename... Fs> void execute_with_scheduler(Fs...) {
+  struct unsupported;
+  static_assert((std::is_same_v<unsupported, Fs> && ...),
+                "execute_with_scheduler is unavailable for OOX tasks");
+}
+}
+#endif
+'''
+
+
 def git_file(source: Path, path: str) -> bytes:
     return subprocess.check_output(["git", "show", f"{COMMIT}:{path}"], cwd=source)
 
@@ -141,6 +177,8 @@ def apply_reference_portability(source: Path):
 
 
 def select_backend(source: Path, backend: str):
+    parallel_path = "parlaylib/include/parlay/parallel.h"
+    restore_reference_file(source, parallel_path)
     if backend == "reference":
         restore_reference_tree(
             source, "parlaylib/include/parlay/internal/scheduler_plugins/eigen"
@@ -156,11 +194,27 @@ def select_backend(source: Path, backend: str):
             apply_reference_portability(source)
     else:
         plugin = source / "parlaylib/include/parlay/internal/scheduler_plugins/eigen.h"
-        plugin.write_text(adapter_text())
+        plugin.write_text(task_adapter_text() if backend == "oox-tasks"
+                          else adapter_text())
         initialization = source / (
             "parlaylib/include/parlay/internal/scheduler_plugins/common/initialization.h"
         )
-        initialization.write_text(initialization_text())
+        if backend == "oox-tasks":
+            parallel = source / parallel_path
+            parallel.write_text(parallel.read_text().replace(
+                "  static internal::InitOnce warmup{[] { internal::warmup(num_workers()); }};",
+                "  // The OOX adapter initializes its own pool without a slot barrier.",
+            ))
+            initialization.write_text(
+                '#pragma once\n#include <benchmarks/scheduler_eval/oox_task_adapter.h>\n'
+                'namespace parlay::internal {\n'
+                'struct InitOnce { template <typename F> InitOnce(F&& f) { f(); } };\n'
+                'struct SpinBarrier { std::atomic<size_t> remaining;\n'
+                'explicit SpinBarrier(size_t n) : remaining(n) {}\n'
+                'void Notify() { --remaining; }\n'
+                'void Wait() { while (remaining.load()) CpuRelax(); } };\n}\n')
+        else:
+            initialization.write_text(initialization_text())
 
 
 def validate_source(source: Path):
@@ -279,6 +333,7 @@ def restore_checkout(source: Path):
         source, "parlaylib/include/parlay/internal/scheduler_plugins/eigen"
     )
     for path in [
+        "parlaylib/include/parlay/parallel.h",
         "parlaylib/include/parlay/internal/scheduler_plugins/eigen.h",
         "parlaylib/include/parlay/internal/scheduler_plugins/common/initialization.h",
         "common/runTests.py",
@@ -300,6 +355,8 @@ def parse_args():
                         default=root / "cmake-build-pbbs/results")
     parser.add_argument("--compiler", default=shutil.which("clang++") or "c++")
     parser.add_argument("--threads", type=int, default=os.cpu_count() or 1)
+    parser.add_argument("--task-grain", type=int, default=1024,
+                        help="OOX task leaf size when PBBS supplies no grain")
     parser.add_argument("--backend", action="append", choices=BACKENDS,
                         help="Backend to run; defaults to OOX")
     parser.add_argument("--mode", action="append",
@@ -323,6 +380,8 @@ def parse_args():
 
 def main():
     args, root = parse_args()
+    if args.threads <= 0 or args.task_grain <= 0:
+        raise ValueError("threads and task-grain must be positive")
     source = args.source.resolve()
     validate_source(source)
     if args.prepare_only:
@@ -330,7 +389,11 @@ def main():
         return
 
     try:
-        configure_checkout(source, root, args.compiler)
+        compiler = args.compiler
+        if "oox-tasks" in (args.backend or []):
+            compiler += f" -DHAVE_EIGEN=1 -DOOX_EIGEN_NUM_THREADS={args.threads}"
+            compiler += f" -DOOX_PBBS_TASK_GRAIN={args.task_grain}"
+        configure_checkout(source, root, compiler)
         args.output.mkdir(parents=True, exist_ok=True)
         backends = args.backend or ["oox"]
         if args.mode and len(backends) != 1:
@@ -351,7 +414,8 @@ def main():
             benchmarks = args.benchmark or DEFAULT_BENCHMARKS
         for backend in backends:
             select_backend(source, backend)
-            supported = REFERENCE_MODES if backend == "reference" else OOX_MODES
+            supported = (REFERENCE_MODES if backend == "reference" else
+                         ["OOX_TASKS"] if backend == "oox-tasks" else OOX_MODES)
             modes = args.mode or supported
             unknown = set(modes) - set(supported)
             if unknown:

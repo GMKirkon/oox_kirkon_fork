@@ -4,15 +4,21 @@
 
 #include <benchmark/benchmark.h>
 
-#ifdef EIGEN_MODE
+#ifdef OOX_TASK_MODE
+#include <oox/oox.h>
+#elif defined(EIGEN_MODE)
 #include "benchmarks/eigen/eigen_pool.h"
 #endif
 
 namespace scheduler_eval {
 
 SchedulerMetrics ReadSchedulerMetrics() {
-#ifdef EIGEN_MODE
+#if defined(EIGEN_MODE) || defined(OOX_TASK_MODE)
+#ifdef OOX_TASK_MODE
+  const auto value = oox::internal::get_eigen_pool().GetStatistics();
+#else
   const auto value = EigenPool().GetStatistics();
+#endif
   return {value.scheduled,           value.executed, value.successful_steals,
           value.failed_steal_rounds, value.sleeps,   value.idle_nanoseconds};
 #else
@@ -23,7 +29,7 @@ SchedulerMetrics ReadSchedulerMetrics() {
 void ReportSchedulerMetrics(benchmark::State &state,
                             const SchedulerMetrics &before,
                             const SchedulerMetrics &after) {
-#ifdef EIGEN_MODE
+#if defined(EIGEN_MODE) || defined(OOX_TASK_MODE)
   state.counters["tasks_scheduled"] = after.scheduled - before.scheduled;
   state.counters["tasks_executed"] = after.executed - before.executed;
   state.counters["successful_steals"] =

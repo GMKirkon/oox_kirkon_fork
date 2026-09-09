@@ -2,7 +2,9 @@
 
 #pragma once
 
-#ifdef RAPID_START_MODE
+#ifdef OOX_TASK_MODE
+#include "oox_task_adapter.h"
+#elif defined(RAPID_START_MODE)
 #include "rapid_start_adapter.h"
 #else
 #include "benchmarks/eigen/parallel_for.h"

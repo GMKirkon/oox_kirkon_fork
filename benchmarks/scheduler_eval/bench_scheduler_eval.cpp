@@ -160,4 +160,11 @@ BENCHMARK_TEMPLATE(SpmvBenchmark, SparseKind::Triangle)
     ->UseRealTime();
 } // namespace
 
-BENCHMARK_MAIN();
+int main(int argc, char **argv) {
+  benchmark::Initialize(&argc, argv);
+  if (benchmark::ReportUnrecognizedArguments(argc, argv))
+    return 1;
+  scheduler_eval::Initialize();
+  benchmark::RunSpecifiedBenchmarks();
+  benchmark::Shutdown();
+}
