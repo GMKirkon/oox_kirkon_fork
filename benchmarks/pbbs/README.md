@@ -1,5 +1,16 @@
 # PBBS eigen-mailbox reproduction
 
+`--backend serial --mode SERIAL` selects the original serial BFS, hull, hash
+deduplication, radix/comparison sort, divsufsort, MST and spanning-forest
+implementations. It uses the pinned sequential Parlay plugin and one execution
+thread regardless of `--threads`. The selected compiler is also applied to
+serial makefiles, with C++20 and platform-specific portability flags.
+`--compile-only` builds all eight; `--ci-smoke` runs the six portable serial
+sort/dedup/suffix/forest checker suites after compiling all eight. Explicit
+`--benchmark` can select any registered serial implementation. An unknown
+benchmark or failed compiler now terminates the driver rather than producing
+an apparently successful empty or failed build.
+
 The additional `--backend oox-tasks --mode OOX_TASKS` adapter evaluates actual
 `oox::run`/`oox::var` task graphs for the same application suite. It compiles the
 OOX worker count from `--threads` and uses `--task-grain 1024` whenever PBBS does

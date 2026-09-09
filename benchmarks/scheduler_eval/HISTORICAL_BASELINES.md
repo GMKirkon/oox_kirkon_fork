@@ -16,8 +16,15 @@ python3 benchmarks/scheduler_eval/paper_graphs.py --kind trees-524k \
 
 The supported presets are square/cube grids, 100 parallel chains, both phased
 families, trees-524k, and rand-arity-100. Small/medium/large use the original
-1M/10M/100M load budgets, not vertex counts. Trunk-first and rmat24/rmat27 are
-not inferred from unrelated PASL defaults. Real data remains externally
+1M/10M/100M load budgets, not vertex counts. Trunk-first and rmat24/rmat27 use
+the original `new-sc15-graph` branch at `d2147d5986866d6060b6dee562fa65df432f90b7`.
+For those three kinds the tool requires a checkout at that revision instead.
+Its RMat presets derive vertex counts from the load budget: the large preset
+requests 13,333,333 vertices and 119,999,997 edges for both labels, with different
+quadrant probabilities. The names must not be interpreted as literal 2^24 and
+2^27 sizes; `input_graphs.py` provides separately labeled PBBS recipes for those
+literal sizes. The exact artifact dataset still needs provenance verification.
+Real data remains externally
 supplied; this tool does not download it or assert dataset licensing.
 
 To generate a file, build `graphfile.opt2` in the pinned PASL checkout and omit
@@ -78,5 +85,6 @@ the repository's Apache-2.0 license applies. Source references:
 
 - [PASL parameters](https://github.com/deepsea-inria/pasl/blob/d3ed9488cea5a8d35b9a86b4408e0f6f9211413b/graph/bench/graph.ml)
 - [PASL topology generators](https://github.com/deepsea-inria/pasl/blob/d3ed9488cea5a8d35b9a86b4408e0f6f9211413b/graph/include/graphgenerators.hpp)
+- [SC15 trunk-first and RMat parameters](https://github.com/deepsea-inria/pasl/blob/d2147d5986866d6060b6dee562fa65df432f90b7/graph/bench/graph.ml)
 - [Heartbeat targets](https://github.com/deepsea-inria/heartbeat/blob/1b2ebc695266b406e26d1565410ddad3da15c935/bench/Makefile)
 - [SPTL BFS invocation](https://github.com/deepsea-inria/pbbs-sptl/blob/87c51ef24a458d127072fa056f5e19368d9d729f/bench/bfs.cpp)

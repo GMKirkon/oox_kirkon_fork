@@ -6,6 +6,8 @@ The `Pasl*` branches in `graph_workloads.cpp` and the parameter formulas in
 `paper_graphs.py` adapt `graph/include/graphgenerators.hpp` and
 `graph/bench/graph.ml` from PASL commit
 `d3ed9488cea5a8d35b9a86b4408e0f6f9211413b`.
+The SC15 trunk-first and RMat formulas additionally use
+`d2147d5986866d6060b6dee562fa65df432f90b7` (`new-sc15-graph`), also Apache-2.0.
 
 Copyright (c) 2014 Umut Acar, Arthur Chargueraud, and Michael Rainey.
 All rights reserved.

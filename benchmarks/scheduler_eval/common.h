@@ -2,7 +2,9 @@
 
 #pragma once
 
-#ifdef OOX_TASK_MODE
+#ifdef SERIAL
+#include "serial_adapter.h"
+#elif defined(OOX_TASK_MODE)
 #include "oox_task_adapter.h"
 #elif defined(RAPID_START_MODE)
 #include "rapid_start_adapter.h"
@@ -25,6 +27,14 @@
 #include <vector>
 
 namespace scheduler_eval {
+
+inline int ExecutionThreads() {
+#ifdef SERIAL
+  return 1;
+#else
+  return GetNumThreads();
+#endif
+}
 
 using Clock = std::chrono::steady_clock;
 

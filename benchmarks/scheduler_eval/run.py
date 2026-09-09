@@ -13,6 +13,8 @@ import socket
 import subprocess
 import sys
 
+import hardware
+
 
 def capture(command, cwd):
     return subprocess.check_output(command, cwd=cwd, text=True,
@@ -62,6 +64,8 @@ def parse_args(root):
     parser.add_argument("--memory-node", type=int)
     parser.add_argument("--interleave-memory", action="store_true")
     parser.add_argument("--perf", action="store_true")
+    parser.add_argument("--likwid-group", help="LIKWID event group, e.g. MEM")
+    parser.add_argument("--likwid-cpus", help="explicit CPU IDs, e.g. 0-3")
     parser.add_argument("--perf-events",
                         default="cycles,instructions,cache-misses,cpu-migrations")
     return parser.parse_args()
@@ -138,8 +142,7 @@ def main():
     if args.graph and not args.graph.is_file():
         raise ValueError(f"graph file does not exist: {args.graph}")
     placement = placement_prefix(args)
-    if args.perf and (platform.system() != "Linux" or not shutil.which("perf")):
-        raise RuntimeError("--perf requires perf on Linux")
+    hardware.validate_options(args)
     executable_dir = args.build.resolve() / "benchmarks/scheduler_eval"
     executables = sorted(executable_dir.glob("bench_scheduler_eval_*"))
     modes = args.mode or [path.name.removeprefix("bench_scheduler_eval_")
@@ -188,6 +191,8 @@ def main():
         "source_vertex": args.source_vertex,
         "paper_scale": args.paper_scale,
         "modes": modes,
+        "execution_threads_by_mode": {
+            mode: 1 if mode == "SERIAL_ELISION" else args.threads for mode in modes},
         "oox_commit": revision(root),
         "thesis_commit": revision(root, "thirdparty/composable-parallel-scheduler-thesis"),
         "pbbs_commit": revision(root, "thirdparty/pbbsbench"),
@@ -204,6 +209,7 @@ def main():
         },
         "numa_command": placement,
         "perf_events": args.perf_events.split(",") if args.perf else [],
+        "hardware_collection": hardware.metadata(args),
     }
     if args.graph:
         digest = hashlib.sha256()
@@ -232,10 +238,13 @@ def main():
         if benchmark_filter:
             command.append(f"--benchmark_filter={benchmark_filter}")
         command = placement + command
-        if args.perf:
-            command = ["perf", "stat", "-x", ";", "-e", args.perf_events,
-                       "-o", str(raw / f"perf_{mode}.csv"), "--"] + command
+        counter_tool = "perf" if args.perf else "likwid"
+        counter_output = raw / f"{counter_tool}_{mode}.csv"
+        command = hardware.counter_prefix(args, counter_output) + command
         subprocess.run(command, env=env, check=True, timeout=args.timeout)
+        if hardware.metadata(args) and (
+                not counter_output.is_file() or not counter_output.stat().st_size):
+            raise RuntimeError(f"counter collection produced no output: {counter_output}")
         json.loads((raw / f"bench_scheduler_eval_{mode}.json").read_text())
         scenarios = ["spin"] if args.smoke else ["spin", "barrier", "multitask"]
         if not args.smoke and mode == "EIGEN_STEALING_GRAINSIZE":

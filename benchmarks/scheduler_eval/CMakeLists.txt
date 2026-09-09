@@ -1,4 +1,4 @@
-set(OOX_SCHEDULER_EVAL_MODES)
+set(OOX_SCHEDULER_EVAL_MODES SERIAL_ELISION)
 set(OOX_SCHEDULER_EVAL_NON_REENTRANT_MODES RAPID_START)
 set(OOX_SCHEDULER_EVAL_TESTS)
 
@@ -21,7 +21,10 @@ function(oox_configure_scheduler_eval_target target mode)
   target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_compile_definitions(${target} PRIVATE
     SCHEDULER_EVAL_MODE_NAME="${mode}")
-  if(mode STREQUAL "OOX_TASKS")
+  if(mode STREQUAL "SERIAL_ELISION")
+    target_compile_definitions(${target} PRIVATE SERIAL=1)
+    target_link_libraries(${target} PRIVATE OOX)
+  elseif(mode STREQUAL "OOX_TASKS")
     target_compile_definitions(${target} PRIVATE
       OOX_TASK_MODE=1 OOX_EIGEN_ENABLE_STATS=1)
     target_link_libraries(${target} PRIVATE OOX OOX::eigen)
@@ -133,6 +136,13 @@ if(OOX_ENABLE_EIGEN AND Python3_Interpreter_FOUND)
   add_test(NAME scheduler_eval_historical_tools
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/tests_tools.py)
   list(APPEND OOX_SCHEDULER_EVAL_TESTS scheduler_eval_historical_tools)
+  add_test(NAME scheduler_eval_serial_runner_smoke
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/run.py
+      --build ${PROJECT_BINARY_DIR}
+      --output ${CMAKE_CURRENT_BINARY_DIR}/serial-runner-smoke
+      --mode SERIAL_ELISION --threads 2 --repetitions 1 --timeout 120 --smoke)
+  set_tests_properties(scheduler_eval_serial_runner_smoke PROPERTIES TIMEOUT 180)
+  list(APPEND OOX_SCHEDULER_EVAL_TESTS scheduler_eval_serial_runner_smoke)
   add_test(NAME scheduler_eval_runner_smoke
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/run.py
       --build ${PROJECT_BINARY_DIR}

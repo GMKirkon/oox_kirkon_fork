@@ -24,7 +24,7 @@ int main(int argc, char **argv) {
   const auto iterations = Argument(argc, argv, "--iterations", 10);
   const auto tasks_per_worker = Argument(argc, argv, "--tasks-per-worker", 100);
   const auto scenario = Scenario(argc, argv);
-  const auto workers = static_cast<std::size_t>(GetNumThreads());
+  const auto workers = static_cast<std::size_t>(ExecutionThreads());
   const auto tasks =
       scenario == "multitask" ? workers * tasks_per_worker : workers;
   if ((scenario != "spin" && scenario != "barrier" &&

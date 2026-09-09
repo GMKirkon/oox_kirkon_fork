@@ -1,12 +1,40 @@
 # SPDX-License-Identifier: Apache-2.0
 """Independent fixtures for historical command plans and metric ingestion."""
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 
 from baselines import parse_metrics
 from paper_graphs import parameters
+from input_graphs import recipe, validate_graph
+import hardware
 
 
 class HistoricalToolsTest(unittest.TestCase):
+    def test_rmat_profiles_and_small_graph_reader(self):
+        program, args = recipe("rmat24")
+        self.assertEqual(program, "rMatGraph")
+        self.assertEqual(args[-1], "16777216")
+        self.assertEqual(args[args.index("-m") + 1], "201326592")
+        self.assertEqual(recipe("rmat27")[1][-1], "134217728")
+        self.assertEqual(recipe("rmat27", smoke=True)[1][-1], "1024")
+        self.assertEqual(validate_graph(Path(__file__).with_name("graph_smoke.adj")), (4, 4))
+
+    def test_likwid_wrapper_and_conflicts(self):
+        args = SimpleNamespace(perf=False, perf_events="cycles", cpu_node=None,
+                               likwid_group="MEM", likwid_cpus="0,2-3")
+        hardware.validate_options(args, check_tools=False)
+        self.assertEqual(hardware.counter_prefix(args, Path("counts.csv")),
+                         ["likwid-perfctr", "-C", "0,2-3", "-g", "MEM", "-O", "-o", "counts.csv"])
+        for cpus in ("3-1", "0,0", "-C 1", "0-65536"):
+            args.likwid_cpus = cpus
+            with self.subTest(cpus=cpus), self.assertRaises(ValueError):
+                hardware.validate_options(args, check_tools=False)
+        args.likwid_cpus = "0-3"
+        args.perf = True
+        with self.assertRaises(ValueError):
+            hardware.validate_options(args, check_tools=False)
+
     def test_pasl_published_harness_parameters(self):
         # Expected values evaluated independently from graph.ml's load table.
         expected = {
@@ -21,12 +49,17 @@ class HistoricalToolsTest(unittest.TestCase):
             ("trees-524k", "medium"): ("nb_phases", 38),
             ("trees-524k", "large"): ("nb_phases", 381),
             ("rand-arity-100", "large"): ("num_rows", 1000000),
+            ("trunk-first", "large"): ("depth_of_branches", 10000000),
+            ("rmat24", "large"): ("tgt_nb_vertices", 13333333),
+            ("rmat27", "large"): ("nb_edges", 119999997),
         }
         for (kind, size), (name, value) in expected.items():
             with self.subTest(kind=kind, size=size):
                 self.assertEqual(parameters(kind, size)[name], value)
         self.assertEqual(parameters("rand-arity-100", "large")["bits"], 32)
         self.assertEqual(parameters("trees-524k", "large")["bits"], 64)
+        self.assertEqual(parameters("rmat27", "small")["a"], 0.57)
+        self.assertEqual(parameters("rmat24", "small")["a"], 0.5)
 
     def test_heartbeat_example_keeps_repeated_measurements(self):
         result = parse_metrics("""diagnostic text

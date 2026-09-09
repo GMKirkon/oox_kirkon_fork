@@ -2,6 +2,7 @@
 """Run the pinned PBBS submodule with historical or OOX Eigen."""
 
 import argparse
+import ast
 import os
 from pathlib import Path
 import platform
@@ -36,7 +37,14 @@ CI_SMOKE_BENCHMARKS = [
     "minSpanningForest/parallelFilterKruskal",
     "spanningForest/ndST",
 ]
-BACKENDS = ["reference", "oox", "oox-tasks"]
+SERIAL_BENCHMARKS = [
+    "breadthFirstSearch/serialBFS", "convexHull/serialHull",
+    "removeDuplicates/serial_hash", "integerSort/serialRadixSort",
+    "comparisonSort/serialSort", "suffixArray/serialDivsufsort",
+    "minSpanningForest/serialMST", "spanningForest/serialST",
+]
+SERIAL_SMOKE_BENCHMARKS = SERIAL_BENCHMARKS[2:]
+BACKENDS = ["reference", "oox", "oox-tasks", "serial"]
 REFERENCE_MODES = [
     "EIGEN_SIMPLE",
     "EIGEN_TIMESPAN",
@@ -179,6 +187,19 @@ def apply_reference_portability(source: Path):
 def select_backend(source: Path, backend: str):
     parallel_path = "parlaylib/include/parlay/parallel.h"
     restore_reference_file(source, parallel_path)
+    if backend == "serial":
+        plugin = source / "parlaylib/include/parlay/internal/scheduler_plugins/eigen.h"
+        plugin.write_text('#pragma once\n#include "sequential.h"\n')
+        initialization = source / "parlaylib/include/parlay/internal/scheduler_plugins/common/initialization.h"
+        initialization.write_text(
+            '#pragma once\n#include <atomic>\n#include <cstddef>\n'
+            'namespace parlay::internal {\n'
+            'struct InitOnce { template <typename F> InitOnce(F&& f) { f(); } };\n'
+            'struct SpinBarrier { std::atomic<size_t> remaining;\n'
+            'explicit SpinBarrier(size_t n) : remaining(n) {}\n'
+            'void Notify() { --remaining; }\n'
+            'void Wait() { while (remaining.load()) {} } };\n}\n')
+        return
     if backend == "reference":
         restore_reference_tree(
             source, "parlaylib/include/parlay/internal/scheduler_plugins/eigen"
@@ -240,6 +261,11 @@ def configure_checkout(source: Path, root: Path, compiler: str):
     runall_text = runall_text.replace(
         '    # ["nearestNeighbors/octTree",True,0],',
         '    ["nearestNeighbors/octTree",True,0],',
+    )
+    runall_text = runall_text.replace("int(maxcpus / 2)", "max(1, int(maxcpus / 2))")
+    runall_text = runall_text.replace(
+        "    os.system(ss)",
+        '    if os.system(ss):\n        raise NameError("compilation failed: " + ss)',
     )
     runall_text = runall_text.replace(
         "    if (procs==1) : rounds = 1",
@@ -326,6 +352,14 @@ def configure_checkout(source: Path, root: Path, compiler: str):
             "EIGENFLAGS = -D_LIBCPP_ENABLE_CXX17_REMOVED_UNARY_BINARY_FUNCTION",
         )
     defs.write_text(text)
+    sequential = git_file(source, "common/seqDefs").decode()
+    sequential = sequential.replace("CC = g++", f"CC = {compiler}")
+    sequential = sequential.replace("-std=c++17", "-std=c++20")
+    if platform.machine() not in ("x86_64", "AMD64"):
+        sequential = sequential.replace("-mcx16 ", "")
+    if platform.system() == "Darwin":
+        sequential = sequential.replace("CCFLAGS =", "CCFLAGS = -D_LIBCPP_ENABLE_CXX17_REMOVED_UNARY_BINARY_FUNCTION")
+    (source / "common/seqDefs").write_text(sequential)
 
 
 def restore_checkout(source: Path):
@@ -338,6 +372,7 @@ def restore_checkout(source: Path):
         "parlaylib/include/parlay/internal/scheduler_plugins/common/initialization.h",
         "common/runTests.py",
         "common/parallelDefs",
+        "common/seqDefs",
         "runall",
         "benchmarks/nearestNeighbors/octTree/neighbors.h",
         "benchmarks/removeDuplicates/bench/dedupTime.C",
@@ -394,6 +429,16 @@ def main():
             compiler += f" -DHAVE_EIGEN=1 -DOOX_EIGEN_NUM_THREADS={args.threads}"
             compiler += f" -DOOX_PBBS_TASK_GRAIN={args.task_grain}"
         configure_checkout(source, root, compiler)
+        registered = set()
+        for statement in ast.parse((source / "runall").read_text()).body:
+            if isinstance(statement, ast.Assign) and any(
+                    isinstance(target, ast.Name) and target.id == "tests"
+                    for target in statement.targets):
+                registered = {entry[0] for entry in ast.literal_eval(statement.value)}
+                break
+        unknown_benchmarks = set(args.benchmark or []) - registered
+        if unknown_benchmarks:
+            raise ValueError(f"unregistered PBBS benchmark(s): {sorted(unknown_benchmarks)}")
         args.output.mkdir(parents=True, exist_ok=True)
         backends = args.backend or ["oox"]
         if args.mode and len(backends) != 1:
@@ -415,6 +460,7 @@ def main():
         for backend in backends:
             select_backend(source, backend)
             supported = (REFERENCE_MODES if backend == "reference" else
+                         ["SERIAL"] if backend == "serial" else
                          ["OOX_TASKS"] if backend == "oox-tasks" else OOX_MODES)
             modes = args.mode or supported
             unknown = set(modes) - set(supported)
@@ -427,14 +473,22 @@ def main():
                     "EIGEN_MODE": mode,
                     "BENCH_NUM_THREADS": str(args.threads),
                 })
+                if backend == "serial":
+                    env.update(BENCH_NUM_THREADS="1", PARLAY_NUM_THREADS="1", OMP_NUM_THREADS="1")
                 if args.ci_smoke:
                     env["PBBS_ROUNDS"] = "1"
                 phases = [(benchmarks, args.compile_only, True, "")]
+                if backend == "serial" and not args.benchmark and not args.all_benchmarks:
+                    phases = [(SERIAL_BENCHMARKS, args.compile_only, True, "")]
                 if args.ci_smoke:
-                    phases = [(DEFAULT_BENCHMARKS, True, True, "_compile"),
-                              (benchmarks, False, False, "")]
+                    full_suite = SERIAL_BENCHMARKS if backend == "serial" else DEFAULT_BENCHMARKS
+                    smoke_suite = SERIAL_SMOKE_BENCHMARKS if backend == "serial" else benchmarks
+                    phases = [(full_suite, True, True, "_compile"),
+                              (smoke_suite, False, False, "")]
                 for selected, compile_only, force_compile, suffix in phases:
-                    command = [sys.executable, "runall", "-par"]
+                    command = [sys.executable, "runall"]
+                    if backend != "serial":
+                        command.append("-par")
                     if force_compile:
                         command.append("-force")
                     if not args.numa:

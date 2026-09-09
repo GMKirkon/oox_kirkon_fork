@@ -2,6 +2,32 @@
 
 See [the porting-plan status](PLAN_STATUS.md) for the remaining gaps versus the
 original full reproduction plan.
+
+`SERIAL_ELISION` runs the same algorithms with serial loop execution. It keeps
+the requested thread count for workload-size formulas, while metadata and
+execution traces report one execution thread. This is an algorithm-elision
+control, not a replacement for independent serial implementations. Concurrent
+caller experiments still create their explicitly requested caller threads.
+The PBBS driver separately provides eight original implementations with
+`--backend serial --mode SERIAL`; those always execute with one worker.
+
+Use `input_graphs.py --kind rmat24 --smoke --output <directory>` to build the
+pinned PBBS generator and produce a validated small graph. Omit `--smoke` for
+the full RMat24/RMat27 recipe; random-local and cube-grid recipes support
+`--size small|large`. These are PBBS recipes, not assertions of byte identity
+with historical PASL datasets. Metadata records source revision, generator
+hash, parameters, actual graph dimensions, and graph SHA-256.
+
+On Linux, `--likwid-group MEM --likwid-cpus 0-3` wraps the benchmark process in
+`likwid-perfctr` and retains its CSV output. Use a group supported by the CPU.
+LIKWID collects across the selected CPUs, including unrelated work on them;
+reserve those CPUs for the experiment. Counts include process initialization
+and the entire selected benchmark suite. They are not individual kernel
+counters. LIKWID and `--perf` are mutually exclusive; LIKWID pinning cannot be
+combined with `--cpu-node`, though explicit memory placement is supported.
+An unavailable collector or missing output fails the run without marking it
+complete. PAPI instrumentation and useful-work utilization remain unmeasured.
+The wrapper follows the [official LIKWID interface](https://github.com/RRZE-HPC/likwid/blob/master/doc/likwid-perfctr.1).
 See [historical inputs and baseline runners](HISTORICAL_BASELINES.md) for pinned
 PASL commands and revision-checked historical executable integration.
 

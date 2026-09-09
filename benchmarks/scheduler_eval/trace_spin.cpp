@@ -14,7 +14,7 @@ struct Event {
 
 int main(int argc, char **argv) {
   using namespace scheduler_eval;
-  const auto workers = static_cast<std::size_t>(GetNumThreads());
+  const auto workers = static_cast<std::size_t>(ExecutionThreads());
   const auto tasks = Argument(argc, argv, "--tasks", workers * 4);
   const auto work = Argument(argc, argv, "--work", 10000);
   const auto iterations = Argument(argc, argv, "--iterations", 1024);

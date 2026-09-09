@@ -17,15 +17,26 @@ import subprocess
 import tempfile
 
 PASL_REVISION = "d3ed9488cea5a8d35b9a86b4408e0f6f9211413b"
+PASL_SC15_REVISION = "d2147d5986866d6060b6dee562fa65df432f90b7"
+SC15_KINDS = ("trunk-first", "rmat24", "rmat27")
 KINDS = ("square-grid", "cube-grid", "par-chains-100", "phases-10-d-2",
-         "phases-50-d-5", "trees-524k", "rand-arity-100")
+         "phases-50-d-5", "trees-524k", "rand-arity-100", *SC15_KINDS)
 LOADS = {"small": 1000000, "medium": 10000000, "large": 100000000}
 
 
 def parameters(kind, size):
     load = LOADS[size]
     bits = 64 if size == "large" else 32
-    if kind == "square-grid":
+    if kind == "trunk-first":
+        result = dict(generator="unbalanced_tree", depth_of_trunk=2,
+                      depth_of_branches=load // 10, trunk_first=1)
+    elif kind in ("rmat24", "rmat27"):
+        vertices = load * (2 if size == "large" else 10) // 15
+        a, b = (0.5, 0.1) if kind == "rmat24" else (0.57, 0.19)
+        bits = 64
+        result = dict(generator="rmat", tgt_nb_vertices=vertices,
+                      nb_edges=9 * vertices, rmat_seed=3234230, a=a, b=b, c=b)
+    elif kind == "square-grid":
         side = math.isqrt(load // 2)
         result = dict(generator="grid_2d", width=side, height=side)
     elif kind == "cube-grid":
@@ -79,15 +90,16 @@ def main():
     for name, value in dict(params, generator_proc=args.threads,
                             proc=args.threads, outfile="graph.adj_bin").items():
         command.extend([f"-{name}", str(value)])
-    manifest = dict(pasl_revision=PASL_REVISION, kind=args.kind, size=args.size,
+    required_revision = PASL_SC15_REVISION if args.kind in SC15_KINDS else PASL_REVISION
+    manifest = dict(pasl_revision=required_revision, kind=args.kind, size=args.size,
                     parameters=params, command=command, complete=False)
     if args.plan:
         print(json.dumps(manifest, indent=2))
         return
     actual = subprocess.check_output(
         ["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
-    if actual != PASL_REVISION:
-        raise RuntimeError(f"PASL revision {actual} differs from {PASL_REVISION}")
+    if actual != required_revision:
+        raise RuntimeError(f"PASL revision {actual} differs from {required_revision}")
     if subprocess.check_output(["git", "-C", str(source), "diff", "HEAD"], text=True):
         raise RuntimeError("PASL has tracked changes; refusing unrecorded generator changes")
     if not executable.is_file():

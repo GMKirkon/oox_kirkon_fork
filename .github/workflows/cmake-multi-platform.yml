@@ -22,6 +22,8 @@ jobs:
             mode: EIGEN_STEALING
           - backend: oox-tasks
             mode: OOX_TASKS
+          - backend: serial
+            mode: SERIAL
     steps:
     - uses: actions/checkout@v5
     - name: Dependencies
