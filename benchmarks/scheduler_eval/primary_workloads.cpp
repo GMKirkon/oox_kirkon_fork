@@ -9,6 +9,7 @@
 #include <limits>
 #include <memory>
 #include <random>
+#include <stdexcept>
 
 namespace scheduler_eval {
 namespace {
@@ -39,7 +40,7 @@ std::size_t NextPowerOfTwo(std::size_t value) {
   return result;
 }
 
-template <typename Value, typename Key>
+template <unsigned DigitBits = 8, typename Value, typename Key>
 std::vector<Value> RadixSortParallelImpl(const std::vector<Value> &values,
                                          Key key,
                                          RadixSortMetrics *metrics) {
@@ -50,21 +51,22 @@ std::vector<Value> RadixSortParallelImpl(const std::vector<Value> &values,
   }
   std::vector<Value> input = values, output(values.size());
   const auto blocks = (values.size() + block_size - 1) / block_size;
-  using Counts = std::array<std::size_t, 256>;
+  constexpr std::size_t bucket_count = std::size_t{1} << DigitBits;
+  using Counts = std::array<std::size_t, bucket_count>;
   std::vector<Counts> counts(blocks), offsets(blocks);
   constexpr auto key_bits = sizeof(key(values.front())) * 8;
   if (metrics)
     *metrics = {};
-  for (unsigned shift = 0; shift < key_bits; shift += 8) {
+  for (unsigned shift = 0; shift < key_bits; shift += DigitBits) {
     const auto start = metrics ? Clock::now() : Clock::time_point{};
     ParallelFor(0, blocks, [&](std::size_t block) {
       counts[block].fill(0);
       const auto end = std::min(input.size(), (block + 1) * block_size);
       for (auto i = block * block_size; i < end; ++i)
-        ++counts[block][(key(input[i]) >> shift) & 255];
+        ++counts[block][(key(input[i]) >> shift) & (bucket_count - 1)];
     });
     std::size_t total = 0;
-    for (std::size_t bucket = 0; bucket < 256; ++bucket)
+    for (std::size_t bucket = 0; bucket < bucket_count; ++bucket)
       for (std::size_t block = 0; block < blocks; ++block) {
         offsets[block][bucket] = total;
         total += counts[block][bucket];
@@ -73,14 +75,14 @@ std::vector<Value> RadixSortParallelImpl(const std::vector<Value> &values,
       auto positions = offsets[block];
       const auto end = std::min(input.size(), (block + 1) * block_size);
       for (auto i = block * block_size; i < end; ++i)
-        output[positions[(key(input[i]) >> shift) & 255]++] = input[i];
+        output[positions[(key(input[i]) >> shift) & (bucket_count - 1)]++] = input[i];
     });
     input.swap(output);
     if (metrics)
       metrics->pass_nanoseconds.push_back(Nanoseconds(start));
   }
   if (metrics)
-    metrics->passes = key_bits / 8;
+    metrics->passes = (key_bits + DigitBits - 1) / DigitBits;
   return input;
 }
 
@@ -285,9 +287,14 @@ std::vector<std::uint64_t> MakeKeys64(KeyKind kind, std::size_t size,
 
 std::vector<std::uint64_t>
 RadixSort64Parallel(const std::vector<std::uint64_t> &keys,
-                    RadixSortMetrics *metrics) {
-  return RadixSortParallelImpl(
-      keys, [](std::uint64_t key) { return key; }, metrics);
+                    RadixSortMetrics *metrics, unsigned digit_bits) {
+  const auto key = [](std::uint64_t value) { return value; };
+  switch (digit_bits) {
+  case 4: return RadixSortParallelImpl<4>(keys, key, metrics);
+  case 8: return RadixSortParallelImpl<8>(keys, key, metrics);
+  case 11: return RadixSortParallelImpl<11>(keys, key, metrics);
+  default: throw std::invalid_argument("radix digit width must be 4, 8 or 11");
+  }
 }
 
 std::vector<KeyValue64>
@@ -324,22 +331,25 @@ std::vector<std::uint32_t> SampleSortSerial(std::vector<std::uint32_t> keys) {
   return keys;
 }
 
-static std::vector<std::uint32_t>
-SampleSortParallelImpl(const std::vector<std::uint32_t> &keys,
-                       SampleSortMetrics *metrics, std::size_t depth) {
+template <typename Value, typename Less>
+static std::vector<Value>
+SampleSortParallelImpl(const std::vector<Value> &keys,
+                       SampleSortMetrics *metrics, std::size_t depth, Less less) {
   if (keys.size() < block_size) {
     if (metrics)
       *metrics = {keys.empty() ? 0u : 1u, keys.size()};
-    return SampleSortSerial(keys);
+    auto sorted = keys;
+    std::sort(sorted.begin(), sorted.end(), less);
+    return sorted;
   }
   const auto buckets =
       std::min<std::size_t>(256, (keys.size() + block_size - 1) / block_size);
-  std::vector<std::uint32_t> samples;
+  std::vector<Value> samples;
   samples.reserve(buckets * 8);
   for (std::size_t i = 0; i < buckets * 8; ++i)
     samples.push_back(keys[(i * keys.size()) / (buckets * 8)]);
-  std::sort(samples.begin(), samples.end());
-  std::vector<std::uint32_t> splitters(buckets - 1);
+  std::sort(samples.begin(), samples.end(), less);
+  std::vector<Value> splitters(buckets - 1);
   for (std::size_t i = 1; i < buckets; ++i)
     splitters[i - 1] = samples[i * 8];
   const auto blocks = (keys.size() + block_size - 1) / block_size;
@@ -349,7 +359,7 @@ SampleSortParallelImpl(const std::vector<std::uint32_t> &keys,
     const auto end = std::min(keys.size(), (block + 1) * block_size);
     for (auto i = block * block_size; i < end; ++i)
       ++offsets[block]
-               [std::upper_bound(splitters.begin(), splitters.end(), keys[i]) -
+               [std::upper_bound(splitters.begin(), splitters.end(), keys[i], less) -
                 splitters.begin()];
   });
   std::vector<std::size_t> bucket_starts(buckets + 1);
@@ -365,13 +375,13 @@ SampleSortParallelImpl(const std::vector<std::uint32_t> &keys,
     for (std::size_t block = 0; block < blocks; ++block)
       offsets[block][bucket - 1] += shift;
   }
-  std::vector<std::uint32_t> output(keys.size());
+  std::vector<Value> output(keys.size());
   ParallelFor(0, blocks, [&](std::size_t block) {
     auto positions = offsets[block];
     const auto end = std::min(keys.size(), (block + 1) * block_size);
     for (auto i = block * block_size; i < end; ++i) {
       const auto bucket =
-          std::upper_bound(splitters.begin(), splitters.end(), keys[i]) -
+          std::upper_bound(splitters.begin(), splitters.end(), keys[i], less) -
           splitters.begin();
       output[positions[bucket]++] = keys[i];
     }
@@ -380,17 +390,17 @@ SampleSortParallelImpl(const std::vector<std::uint32_t> &keys,
 #ifndef RAPID_START_MODE
     const auto size = bucket_starts[bucket + 1] - bucket_starts[bucket];
     if (depth < 32 && size > 4 * block_size && size < keys.size()) {
-      std::vector<std::uint32_t> subproblem(
+      std::vector<Value> subproblem(
           output.begin() + bucket_starts[bucket],
           output.begin() + bucket_starts[bucket + 1]);
-      auto sorted = SampleSortParallelImpl(subproblem, nullptr, depth + 1);
+      auto sorted = SampleSortParallelImpl(subproblem, nullptr, depth + 1, less);
       std::copy(sorted.begin(), sorted.end(),
                 output.begin() + bucket_starts[bucket]);
       return;
     }
 #endif
     std::sort(output.begin() + bucket_starts[bucket],
-              output.begin() + bucket_starts[bucket + 1]);
+              output.begin() + bucket_starts[bucket + 1], less);
   });
   if (metrics) {
     std::size_t largest_bucket = 0;
@@ -405,7 +415,24 @@ SampleSortParallelImpl(const std::vector<std::uint32_t> &keys,
 std::vector<std::uint32_t>
 SampleSortParallel(const std::vector<std::uint32_t> &keys,
                    SampleSortMetrics *metrics) {
-  return SampleSortParallelImpl(keys, metrics, 0);
+  return SampleSortParallelImpl(keys, metrics, 0,
+                                [](auto a, auto b) { return a < b; });
+}
+
+std::vector<std::string>
+SampleSortStrings(const std::vector<std::string> &keys,
+                   SampleSortMetrics *metrics) {
+  return SampleSortParallelImpl(keys, metrics, 0,
+      [](const auto &a, const auto &b) { return a < b; });
+}
+
+std::vector<KeyValue64>
+SampleSortRecords(const std::vector<KeyValue64> &keys,
+                   SampleSortMetrics *metrics) {
+  return SampleSortParallelImpl(keys, metrics, 0,
+      [](const auto &a, const auto &b) {
+        return a.key < b.key || (a.key == b.key && a.value < b.value);
+      });
 }
 
 } // namespace scheduler_eval

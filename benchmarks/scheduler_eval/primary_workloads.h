@@ -87,13 +87,19 @@ std::vector<std::uint64_t> MakeKeys64(KeyKind kind, std::size_t size,
                                      std::uint64_t seed = 1);
 std::vector<std::uint64_t>
 RadixSort64Parallel(const std::vector<std::uint64_t> &keys,
-                    RadixSortMetrics *metrics = nullptr);
+                    RadixSortMetrics *metrics = nullptr, unsigned digit_bits = 8);
 std::vector<KeyValue64>
 RadixSort64PairsParallel(const std::vector<KeyValue64> &keys,
                          RadixSortMetrics *metrics = nullptr);
 std::vector<std::uint32_t> SampleSortSerial(std::vector<std::uint32_t> keys);
 std::vector<std::uint32_t>
 SampleSortParallel(const std::vector<std::uint32_t> &keys,
+                   SampleSortMetrics *metrics = nullptr);
+std::vector<std::string>
+SampleSortStrings(const std::vector<std::string> &keys,
+                   SampleSortMetrics *metrics = nullptr);
+std::vector<KeyValue64>
+SampleSortRecords(const std::vector<KeyValue64> &keys,
                    SampleSortMetrics *metrics = nullptr);
 
 } // namespace scheduler_eval

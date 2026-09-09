@@ -9,6 +9,7 @@
 #include <bit>
 #include <cmath>
 #include <memory>
+#include <stdexcept>
 #include <utility>
 
 namespace scheduler_eval {
@@ -33,8 +34,10 @@ CsrGraph Build(std::size_t vertices, const std::vector<Edge> &input) {
 std::vector<int> BfsParallel(const CsrGraph &graph, bool nested,
                              std::size_t cutoff,
                              GranularityEstimator *estimator,
-                             BfsMetrics *metrics) {
+                             BfsMetrics *metrics, std::uint32_t source) {
   const auto n = graph.VertexCount();
+  if (source >= n && (n != 0 || source != 0))
+    throw std::invalid_argument("BFS source vertex is outside the graph");
   if (n == 0) {
     if (metrics)
       *metrics = {};
@@ -42,8 +45,8 @@ std::vector<int> BfsParallel(const CsrGraph &graph, bool nested,
   }
   auto levels = std::make_unique<std::atomic<int>[]>(n);
   ParallelFor(0, n, [&](std::size_t i) { levels[i].store(-1); });
-  levels[0].store(0);
-  std::vector<std::uint32_t> frontier{0};
+  levels[source].store(0);
+  std::vector<std::uint32_t> frontier{source};
   int level = 0;
   std::atomic<std::uint64_t> nested_launches{0};
   std::atomic<std::uint64_t> sequential_inner_loops{0};
@@ -120,6 +123,62 @@ CsrGraph MakePhased(std::size_t scale, std::size_t phases, std::size_t degree) {
 
 CsrGraph MakeGraph(GraphKind kind, std::size_t scale) {
   std::vector<Edge> edges;
+  // PASL topology adaptations: copyright (c) 2014 Umut Acar,
+  // Arthur Chargueraud and Michael Rainey; Apache-2.0.
+  // Changed for OOX: direct CSR construction, bounded small scales, and no
+  // vertex permutation. paper_graphs.py invokes the exact original generator.
+  if (kind == GraphKind::PaslSquareGrid || kind == GraphKind::PaslCubeGrid) {
+    const bool cube = kind == GraphKind::PaslCubeGrid;
+    const auto side = std::max<std::size_t>(2, cube
+        ? std::cbrt(static_cast<double>(scale) / 3)
+        : std::sqrt(static_cast<double>(scale) / 2));
+    const auto vertices = cube ? side * side * side : side * side;
+    for (std::size_t v = 0; v < vertices; ++v) {
+      const auto x = v % side, y = (v / side) % side, z = v / (side * side);
+      edges.emplace_back(v, z * side * side + y * side + (x + 1) % side);
+      edges.emplace_back(v, z * side * side + ((y + 1) % side) * side + x);
+      if (cube)
+        edges.emplace_back(v, ((z + 1) % side) * side * side + y * side + x);
+    }
+    return Build(vertices, edges);
+  }
+  if (kind == GraphKind::PaslParallelChains100) {
+    const std::size_t paths = 100, length = std::max<std::size_t>(1, scale / 200);
+    const auto sink = paths * length + 1;
+    for (std::size_t path = 0; path < paths; ++path) {
+      const auto first = 1 + path * length;
+      edges.emplace_back(0, first);
+      for (std::size_t i = 1; i < length; ++i)
+        edges.emplace_back(first + i - 1, first + i);
+      edges.emplace_back(first + length - 1, sink);
+    }
+    return Build(sink + 1, edges);
+  }
+  if (kind == GraphKind::PaslPhases10Degree2 ||
+      kind == GraphKind::PaslPhases50Degree5 || kind == GraphKind::PaslTrees524k) {
+    std::size_t phases, width, high, low;
+    if (kind == GraphKind::PaslPhases10Degree2) {
+      phases = 10; width = std::max<std::size_t>(1, scale / 30); high = 1; low = 2;
+    } else if (kind == GraphKind::PaslPhases50Degree5) {
+      phases = 50;
+      width = std::max<std::size_t>(1, scale * (scale >= 100000000 ? 2 : 1) / 250);
+      high = 0; low = 5;
+    } else {
+      width = 524288; phases = std::max<std::size_t>(2, 2 * scale / width);
+      high = 1; low = 0;
+    }
+    for (std::size_t phase = 0; phase + 1 < phases; ++phase) {
+      for (std::size_t column = 0; column < width; ++column) {
+        const auto from = 1 + phase * width + column;
+        if (phase == 0)
+          edges.emplace_back(0, from);
+        const auto degree = column < high ? width : low;
+        for (std::size_t edge = 0; edge < degree; ++edge)
+          edges.emplace_back(from, 1 + (phase + 1) * width + (column + edge) % width);
+      }
+    }
+    return Build(1 + phases * width, edges);
+  }
   if (kind == GraphKind::Tree || kind == GraphKind::RandomArity100) {
     const std::size_t vertices = std::max<std::size_t>(2, scale);
     const std::uint32_t arity = kind == GraphKind::RandomArity100 ? 100 : 64;
@@ -224,12 +283,14 @@ CsrGraph MakeGraph(GraphKind kind, std::size_t scale) {
   return Build(width * width, edges);
 }
 
-std::vector<int> BfsSerial(const CsrGraph &graph) {
+std::vector<int> BfsSerial(const CsrGraph &graph, std::uint32_t source) {
+  if (source >= graph.VertexCount() && (graph.VertexCount() != 0 || source != 0))
+    throw std::invalid_argument("BFS source vertex is outside the graph");
   if (graph.VertexCount() == 0)
     return {};
   std::vector<int> levels(graph.VertexCount(), -1);
-  std::vector<std::uint32_t> queue{0};
-  levels[0] = 0;
+  std::vector<std::uint32_t> queue{source};
+  levels[source] = 0;
   for (std::size_t head = 0; head < queue.size(); ++head) {
     const auto vertex = queue[head];
     for (auto edge = graph.offsets[vertex]; edge < graph.offsets[vertex + 1];
@@ -244,21 +305,21 @@ std::vector<int> BfsSerial(const CsrGraph &graph) {
   return levels;
 }
 
-std::vector<int> BfsFlat(const CsrGraph &graph) {
-  return BfsParallel(graph, false, 0, nullptr, nullptr);
+std::vector<int> BfsFlat(const CsrGraph &graph, std::uint32_t source) {
+  return BfsParallel(graph, false, 0, nullptr, nullptr, source);
 }
 
 std::vector<int> BfsNested(const CsrGraph &graph, std::size_t edge_cutoff,
-                           BfsMetrics *metrics) {
+                           BfsMetrics *metrics, std::uint32_t source) {
   return BfsParallel(graph, true, std::max<std::size_t>(1, edge_cutoff),
-                     nullptr, metrics);
+                     nullptr, metrics, source);
 }
 
 std::vector<int> BfsAdaptive(const CsrGraph &graph,
                              std::chrono::nanoseconds kappa, double alpha,
-                             BfsMetrics *metrics) {
+                             BfsMetrics *metrics, std::uint32_t source) {
   GranularityEstimator estimator(kappa, alpha);
-  return BfsParallel(graph, true, 1, &estimator, metrics);
+  return BfsParallel(graph, true, 1, &estimator, metrics, source);
 }
 
 } // namespace scheduler_eval

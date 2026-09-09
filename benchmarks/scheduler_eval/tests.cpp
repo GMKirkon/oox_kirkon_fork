@@ -61,8 +61,51 @@ bool CheckSpmv() {
 
 #ifdef SCHEDULER_EVAL_HAS_NESTED_BFS
 bool CheckBfs() {
+  const auto grid = scheduler_eval::MakeGraph(scheduler_eval::GraphKind::PaslSquareGrid, 8);
+  if (grid.offsets != std::vector<std::size_t>{0, 2, 4, 6, 8} ||
+      grid.edges != std::vector<std::uint32_t>{1, 2, 0, 3, 3, 0, 2, 1})
+    return false;
+  const auto cube = scheduler_eval::MakeGraph(scheduler_eval::GraphKind::PaslCubeGrid, 24);
+  if (cube.VertexCount() != 8 || cube.edges.size() != 24 ||
+      scheduler_eval::BfsFlat(cube) != std::vector<int>{0, 1, 1, 2, 1, 2, 2, 3})
+    return false;
+  const auto paths = scheduler_eval::MakeGraph(scheduler_eval::GraphKind::PaslParallelChains100, 400);
+  std::vector<int> path_levels(202);
+  for (std::size_t i = 1; i < 201; ++i)
+    path_levels[i] = 1 + (i - 1) % 2;
+  path_levels.back() = 3;
+  if (paths.edges.size() != 300 || scheduler_eval::BfsNested(paths, 2) != path_levels)
+    return false;
+  for (const auto kind : {scheduler_eval::GraphKind::PaslPhases10Degree2,
+                          scheduler_eval::GraphKind::PaslPhases50Degree5}) {
+    const auto graph = scheduler_eval::MakeGraph(kind, 3000);
+    const auto phases = kind == scheduler_eval::GraphKind::PaslPhases10Degree2 ? 10 : 50;
+    const auto width = (graph.VertexCount() - 1) / phases;
+    std::vector<int> expected(graph.VertexCount());
+    for (std::size_t i = 1; i < expected.size(); ++i)
+      expected[i] = 1 + (i - 1) / width;
+    if (scheduler_eval::BfsFlat(graph) != expected ||
+        scheduler_eval::BfsAdaptive(graph, std::chrono::microseconds(20)) != expected)
+      return false;
+  }
   std::istringstream input("AdjacencyGraph 4 4 0 2 3 4 1 2 3 3");
   const auto loaded = scheduler_eval::ReadAdjacencyGraph(input);
+  const std::vector<std::vector<int>> expected_sources{
+      {0, 1, 1, 2}, {-1, 0, -1, 1}, {-1, -1, 0, 1}, {-1, -1, -1, 0}};
+  for (std::uint32_t source = 0; source < expected_sources.size(); ++source) {
+    const auto &expected = expected_sources[source];
+    if (scheduler_eval::BfsSerial(loaded, source) != expected ||
+        scheduler_eval::BfsFlat(loaded, source) != expected ||
+        scheduler_eval::BfsNested(loaded, 1, nullptr, source) != expected ||
+        scheduler_eval::BfsAdaptive(loaded, std::chrono::microseconds(20),
+                                    1.8, nullptr, source) != expected)
+      return false;
+  }
+  try {
+    scheduler_eval::BfsFlat(loaded, 4);
+    return false;
+  } catch (const std::invalid_argument &) {
+  }
   if (scheduler_eval::BfsSerial(loaded) != std::vector<int>{0, 1, 1, 2} ||
       scheduler_eval::BfsFlat(loaded) != std::vector<int>{0, 1, 1, 2})
     return false;

@@ -63,12 +63,12 @@ foreach(mode IN LISTS OOX_SCHEDULER_EVAL_MODES)
     --benchmark_min_time=${OOX_BENCHMARK_CTEST_MIN_TIME})
   list(APPEND OOX_SCHEDULER_EVAL_TESTS ${benchmark_target}_smoke)
   add_test(NAME ${benchmark_target}_extended_smoke COMMAND ${benchmark_target}
-    "--benchmark_filter=(QuickHull|TrigramDedup|RadixSort64).*/1024(/|$)"
+    "--benchmark_filter=(QuickHull|TrigramDedup|RadixSort64|TrigramSampleSort|SampleSortRecords|RadixPassWidth).*/1024(/|$)"
     --benchmark_min_time=${OOX_BENCHMARK_CTEST_MIN_TIME})
   list(APPEND OOX_SCHEDULER_EVAL_TESTS ${benchmark_target}_extended_smoke)
   if(mode MATCHES "^EIGEN" OR mode STREQUAL "OOX_TASKS")
     add_test(NAME ${benchmark_target}_availability_smoke COMMAND ${benchmark_target}
-      "--benchmark_filter=(ChangingWorkerAvailability/4096|OversubscribedLoops/4096/2)(/|$)"
+      "--benchmark_filter=(ChangingWorkerAvailability/4096|OversubscribedLoops/4096/2|FirstTouch<.*>/16384)(/|$)"
       --benchmark_min_time=${OOX_BENCHMARK_CTEST_MIN_TIME})
     list(APPEND OOX_SCHEDULER_EVAL_TESTS ${benchmark_target}_availability_smoke)
   endif()
@@ -130,6 +130,9 @@ if(OOX_ENABLE_EIGEN OR TBB_FOUND)
 endif()
 
 if(OOX_ENABLE_EIGEN AND Python3_Interpreter_FOUND)
+  add_test(NAME scheduler_eval_historical_tools
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/tests_tools.py)
+  list(APPEND OOX_SCHEDULER_EVAL_TESTS scheduler_eval_historical_tools)
   add_test(NAME scheduler_eval_runner_smoke
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/run.py
       --build ${PROJECT_BINARY_DIR}
@@ -147,6 +150,7 @@ if(OOX_ENABLE_EIGEN AND Python3_Interpreter_FOUND)
       --output ${CMAKE_CURRENT_BINARY_DIR}/graph-runner-smoke
       --mode EIGEN_STEALING --threads 2 --repetitions 1 --timeout 120
       --graph ${CMAKE_CURRENT_LIST_DIR}/graph_smoke.adj
+      --source-vertex 2
       --filter BfsFile --smoke)
   set_tests_properties(scheduler_eval_graph_runner_smoke PROPERTIES TIMEOUT 180)
   list(APPEND OOX_SCHEDULER_EVAL_TESTS scheduler_eval_graph_runner_smoke)

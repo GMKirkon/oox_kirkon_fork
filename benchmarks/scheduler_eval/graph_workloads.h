@@ -21,7 +21,13 @@ enum class GraphKind {
   Rmat,
   SquareGrid,
   CubeGrid,
-  SmallWorld
+  SmallWorld,
+  PaslSquareGrid,
+  PaslCubeGrid,
+  PaslParallelChains100,
+  PaslPhases10Degree2,
+  PaslPhases50Degree5,
+  PaslTrees524k
 };
 
 struct BfsMetrics {
@@ -42,12 +48,12 @@ struct CsrGraph {
 
 CsrGraph MakeGraph(GraphKind kind, std::size_t scale);
 CsrGraph ReadAdjacencyGraph(std::istream &input);
-std::vector<int> BfsSerial(const CsrGraph &graph);
-std::vector<int> BfsFlat(const CsrGraph &graph);
+std::vector<int> BfsSerial(const CsrGraph &graph, std::uint32_t source = 0);
+std::vector<int> BfsFlat(const CsrGraph &graph, std::uint32_t source = 0);
 std::vector<int> BfsNested(const CsrGraph &graph, std::size_t edge_cutoff,
-                           BfsMetrics *metrics = nullptr);
+                           BfsMetrics *metrics = nullptr, std::uint32_t source = 0);
 std::vector<int> BfsAdaptive(const CsrGraph &graph,
                              std::chrono::nanoseconds kappa, double alpha = 1.8,
-                             BfsMetrics *metrics = nullptr);
+                             BfsMetrics *metrics = nullptr, std::uint32_t source = 0);
 
 } // namespace scheduler_eval

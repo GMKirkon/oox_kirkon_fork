@@ -52,6 +52,7 @@ def parse_args(root):
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--graph", type=Path,
                         help="PBBS AdjacencyGraph file for BfsFile cases")
+    parser.add_argument("--source-vertex", type=int, default=0)
     parser.add_argument("--paper-scale", action="store_true",
                         help="also register 100-million-element primary cases")
     parser.add_argument("--no-plot", action="store_true")
@@ -130,6 +131,10 @@ def write_heartbeat_comparison(raw, output, modes):
 def main():
     root = Path(__file__).resolve().parents[2]
     args = parse_args(root)
+    if args.source_vertex < 0 or args.source_vertex > 0xffffffff:
+        raise ValueError("source-vertex must be a 32-bit unsigned vertex ID")
+    if args.source_vertex and not args.graph:
+        raise ValueError("source-vertex applies to --graph file inputs")
     if args.graph and not args.graph.is_file():
         raise ValueError(f"graph file does not exist: {args.graph}")
     placement = placement_prefix(args)
@@ -180,6 +185,7 @@ def main():
         "subprocess_timeout_seconds": args.timeout,
         "smoke": args.smoke,
         "graph_file": str(args.graph.resolve()) if args.graph else None,
+        "source_vertex": args.source_vertex,
         "paper_scale": args.paper_scale,
         "modes": modes,
         "oox_commit": revision(root),
@@ -209,6 +215,7 @@ def main():
     env = os.environ.copy()
     if args.graph:
         env["OOX_BENCH_GRAPH"] = str(args.graph.resolve())
+        env["OOX_BENCH_SOURCE"] = str(args.source_vertex)
     if args.paper_scale:
         env["OOX_BENCH_PAPER_SCALE"] = "1"
     env["BENCH_NUM_THREADS"] = str(args.threads)

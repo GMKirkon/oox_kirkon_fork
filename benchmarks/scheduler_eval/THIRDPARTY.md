@@ -1,5 +1,21 @@
 # Third-party notices
 
+## PASL graph topologies and parameter formulas
+
+The `Pasl*` branches in `graph_workloads.cpp` and the parameter formulas in
+`paper_graphs.py` adapt `graph/include/graphgenerators.hpp` and
+`graph/bench/graph.ml` from PASL commit
+`d3ed9488cea5a8d35b9a86b4408e0f6f9211413b`.
+
+Copyright (c) 2014 Umut Acar, Arthur Chargueraud, and Michael Rainey.
+All rights reserved.
+
+Licensed under Apache-2.0, as distributed in this repository's root license.
+OOX modifications replace graph containers with CSR construction, add bounded
+small cases, omit vertex permutation in native variants, and add Python
+command/provenance handling. The original generator path preserves its own
+permutation. No PASL runtime source is vendored here.
+
 ## Deepsea SPTL granularity estimator
 
 `granularity_control.{h,cpp}` adapts the estimator rule from

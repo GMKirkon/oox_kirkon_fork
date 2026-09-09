@@ -2,6 +2,16 @@
 
 See [the porting-plan status](PLAN_STATUS.md) for the remaining gaps versus the
 original full reproduction plan.
+See [historical inputs and baseline runners](HISTORICAL_BASELINES.md) for pinned
+PASL commands and revision-checked historical executable integration.
+
+Native sample sort now includes string and 64-bit record cases (records use
+lexicographic key/value ordering). `RadixPassWidth` compares 4-, 8- and 11-bit
+digits while retaining full-width keys. `Pasl*` BFS cases implement wrap-around
+grids, rejoining chains and cyclic phased topologies without vertex permutation.
+File BFS accepts `--source-vertex`; all three policies and the oracle use it.
+First-touch tests allocate fresh anonymous mappings per repetition, so vector
+initialization or allocator reuse cannot pre-touch the input pages.
 
 The suite also builds `OOX_TASKS`, which expresses parallel ranges as recursive
 `oox::run` tasks joined through `oox::var`. It reads counters from OOX's actual

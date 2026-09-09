@@ -7,8 +7,12 @@
 #include <benchmark/benchmark.h>
 
 #include <numeric>
+#include <memory>
 #include <thread>
 #include <vector>
+#if defined(__unix__) || defined(__APPLE__)
+#include <sys/mman.h>
+#endif
 
 namespace {
 
@@ -133,20 +137,44 @@ BENCHMARK(OversubscribedLoops)
 #endif
 
 template <bool ParallelTouch> void FirstTouch(benchmark::State &state) {
+#if defined(__unix__) || defined(__APPLE__)
   scheduler_eval::SchedulerMetricsScope metrics(state);
-  std::vector<std::uint64_t> data(state.range(0)), output(data.size());
+  const auto size = static_cast<std::size_t>(state.range(0));
+  const auto bytes = size * sizeof(std::uint64_t);
+  std::vector<std::uint64_t> output(size);
   for (auto _ : state) {
     state.PauseTiming();
+    auto *address = static_cast<std::uint64_t *>(mmap(
+        nullptr, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+    if (address == MAP_FAILED) {
+      state.ResumeTiming();
+      state.SkipWithError("unable to map fresh pages for first-touch experiment");
+      break;
+    }
+    const auto unmap = [bytes](std::uint64_t *p) { munmap(p, bytes); };
+    std::unique_ptr<std::uint64_t, decltype(unmap)> data(address, unmap);
     if constexpr (ParallelTouch)
-      ParallelFor(0, data.size(), [&](std::size_t i) { data[i] = i + 1; });
+      ParallelFor(0, size, [&](std::size_t i) { data.get()[i] = i + 1; });
     else
-      std::iota(data.begin(), data.end(), std::uint64_t{1});
+      std::iota(data.get(), data.get() + size, std::uint64_t{1});
     state.ResumeTiming();
-    ParallelFor(0, data.size(),
-                [&](std::size_t i) { output[i] = data[i] * 3; });
+    ParallelFor(0, size,
+                [&](std::size_t i) { output[i] = data.get()[i] * 3; });
     benchmark::DoNotOptimize(output.data());
+    state.PauseTiming();
+    bool valid = true;
+    for (std::size_t i = 0; i < size; ++i)
+      valid &= output[i] == (i + 1) * 3;
+    data.reset();
+    state.ResumeTiming();
+    if (!valid)
+      state.SkipWithError("first-touch output differs from serial formula");
   }
-  state.SetBytesProcessed(state.iterations() * data.size() * sizeof(data[0]));
+  state.counters["fresh_anonymous_mapping"] = 1;
+  state.SetBytesProcessed(state.iterations() * bytes);
+#else
+  state.SkipWithError("first-touch experiment requires anonymous POSIX mappings");
+#endif
 }
 
 #ifndef RAPID_START_MODE

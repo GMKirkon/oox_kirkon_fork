@@ -32,7 +32,19 @@ bool CheckExtendedWorkloads() {
       std::cerr << "radix64 pairs seed=" << seed << '\n';
       return false;
     }
+    if (SampleSortRecords(pairs) != expected_pairs) {
+      std::cerr << "sample records seed=" << seed << '\n';
+      return false;
+    }
     std::sort(expected.begin(), expected.end());
+    for (const auto width : {4u, 8u, 11u}) {
+      RadixSortMetrics tuning;
+      if (RadixSort64Parallel(keys, &tuning, width) != expected ||
+          tuning.passes != (size ? (64u + width - 1) / width : 0u)) {
+        std::cerr << "radix width=" << width << " seed=" << seed << '\n';
+        return false;
+      }
+    }
     RadixSortMetrics metrics;
     if (RadixSort64Parallel(keys, &metrics) != expected ||
         metrics.passes != (size ? 8u : 0u) ||
@@ -47,6 +59,12 @@ bool CheckExtendedWorkloads() {
       strings[2] = strings[1];
     }
     const std::set<std::string> unique(strings.begin(), strings.end());
+    auto sorted_strings = strings;
+    std::sort(sorted_strings.begin(), sorted_strings.end());
+    if (SampleSortStrings(strings) != sorted_strings) {
+      std::cerr << "sample strings seed=" << seed << '\n';
+      return false;
+    }
     if (RemoveDuplicateStrings(strings) !=
         std::vector<std::string>(unique.begin(), unique.end())) {
       std::cerr << "string dedup seed=" << seed << '\n';

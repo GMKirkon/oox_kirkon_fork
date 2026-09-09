@@ -5,15 +5,15 @@ experiments. A green CI run does not establish the latter.
 
 | Plan item | Executable coverage | Remaining reproduction work |
 | --- | --- | --- |
-| Nested BFS | Flat, fixed-grain, and online adaptive traversal; synthetic graph families; PBBS text and PASL binary graph loading; serial level oracle | Exact PASL generator parameter presets and licensed LiveJournal/Twitter/Wikipedia/Europe inputs; published machine-scale runs |
+| Nested BFS | Flat, fixed-grain, and online adaptive traversal; configurable source; PASL topology variants and seven pinned original-generator command presets; PBBS text/PASL binary loading; serial level oracle | Original generator execution; trunk-first/rmat artifact presets; licensed real datasets and published machine-scale runs |
 | QuickHull | PBBS canonical application plus native frontier-parallel QuickHull, with monotone-chain oracle and partition depth | Native variant uses extended-precision predicates and breadth-wise partitions; it is not a verbatim PBBS port or a floating-point reproduction of its circle survivor count |
 | Deduplication | Scalar atomic hash table, native string hash table, synthetic word triples; canonical PBBS trigram cases through application adapter | Native word triples are not PBBS's language model; canonical generator remains in PBBS |
-| Radix sort | Stable 32-bit and 64-bit scalar/pair kernels; untimed per-pass samples; full-output oracle | Tuning pass width remains experimental work |
-| Sample sort | Native scalar sampling/bucketing and recursive refinement of large buckets; canonical PBBS types/generators via adapter | Native string and record variants remain supplied by PBBS |
+| Radix sort | Stable 32-bit and 64-bit scalar/pair kernels; 4/8/11-bit digit experiments; untimed per-pass samples; full-output oracle | Hardware-specific tuning and paper-scale measurements |
+| Sample sort | Native scalar, string and 64-bit record sampling/bucketing; bounded recursive refinement; canonical PBBS generators via adapter | Paper-scale measurements |
 | Secondary applications | All 12 PBBS application families compile through both scheduler and OOX task adapters, including suffix array, octree, triangulation/refinement, ray casting and forests | Full dataset runs and independent serial baselines for every secondary algorithm |
-| Synthetic experiments | Nine cost distributions, concurrent caller sweeps, temporary worker occupation/release, serial/parallel first-touch cases, NUMA placement and perf wrapper | Hardware-specific remote-access measurements and LIKWID/PAPI integrations |
+| Synthetic experiments | Nine cost distributions, concurrent caller sweeps, temporary worker occupation/release, fresh-mapping first-touch cases, NUMA placement and perf wrapper | Hardware-specific remote-access measurements and LIKWID/PAPI integrations |
 | Metrics | Actual executing pool's task/steal/sleep counters; workload descriptors, preflight radix pass samples, graph SHA-256; Heartbeat comparison export | Exact utilization and Heartbeat promotion semantics are unmeasured, explicitly null or documented in the export |
-| Historical comparison | Pinned Eigen/PBBS reference available | Runnable pinned Heartbeat, SPTL and PASL comparison environments |
+| Historical comparison | Pinned Eigen/PBBS reference and revision-checked PASL/Heartbeat/SPTL invocation/metric-ingestion tools | Building and running historical environments and versioning all their auxiliary dependencies |
 
 `OOX_TASKS` evaluates `oox::run` and `oox::var` continuation joins in the native
 suite. The `oox-tasks` PBBS adapter uses the same task graph primitives for
