@@ -29,8 +29,8 @@ inline void Multiply(const DenseMatrix &left, const DenseMatrix &right,
                      DenseMatrix &output) {
   assert(left.columns == right.rows && output.rows == left.rows &&
          output.columns == right.columns);
-  ParallelFor(0, output.rows, [&](std::size_t row) {
-    ParallelFor(0, output.columns, [&](std::size_t column) {
+  EvalParallelFor(0, output.rows, [&](std::size_t row) {
+    EvalParallelFor(0, output.columns, [&](std::size_t column) {
       double sum = 0;
       for (std::size_t i = 0; i < left.columns; ++i)
         sum += left(row, i) * right(i, column);
@@ -46,8 +46,8 @@ inline void Transpose(const DenseMatrix &input, DenseMatrix &output,
   const auto column_blocks = std::min(blocks, input.columns);
   const auto row_size = (input.rows + row_blocks - 1) / row_blocks;
   const auto column_size = (input.columns + column_blocks - 1) / column_blocks;
-  ParallelFor(0, row_blocks, [&](std::size_t row_block) {
-    ParallelFor(0, column_blocks, [&](std::size_t column_block) {
+  EvalParallelFor(0, row_blocks, [&](std::size_t row_block) {
+    EvalParallelFor(0, column_blocks, [&](std::size_t column_block) {
       for (std::size_t row = row_block * row_size;
            row < std::min(input.rows, (row_block + 1) * row_size); ++row)
         for (std::size_t column = column_block * column_size;

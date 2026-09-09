@@ -20,7 +20,7 @@ void Setup(const benchmark::State &) { Initialize(); }
 void Launch(benchmark::State &state) {
   SchedulerMetricsScope metrics(state);
   for (auto _ : state)
-    ParallelFor(0, static_cast<std::size_t>(state.range(0)),
+    EvalParallelFor(0, static_cast<std::size_t>(state.range(0)),
                 [](std::size_t i) { benchmark::DoNotOptimize(i); });
 }
 
@@ -40,7 +40,7 @@ template <SpinPayload Payload> void Spin(benchmark::State &state) {
   std::vector<IsolatedValue> distributed(tasks);
   for (auto _ : state) {
     for (std::size_t call = 0; call < calls; ++call) {
-      ParallelFor(0, tasks, [&](std::size_t task) {
+      EvalParallelFor(0, tasks, [&](std::size_t task) {
         if constexpr (Payload == SpinPayload::Relax) {
           for (std::size_t i = 0; i < work; ++i)
             CpuRelax();

@@ -6,8 +6,15 @@ import shutil
 
 
 def validate_options(args, check_tools=True):
-    if args.perf and args.likwid_group:
-        raise ValueError("select either perf or LIKWID for one run")
+    papi = getattr(args, "papi_events", None)
+    if papi is not None and not papi:
+        raise ValueError("PAPI event list must not be empty")
+    if sum(bool(x) for x in (args.perf, args.likwid_group, papi)) > 1:
+        raise ValueError("select one of perf, LIKWID or PAPI for one run")
+    if papi:
+        events = papi.split(",")
+        if len(set(events)) != len(events) or any(not e or any(c.isspace() for c in e) for e in events):
+            raise ValueError("PAPI events must be nonempty, distinct and comma-separated")
     if bool(args.likwid_group) != bool(args.likwid_cpus):
         raise ValueError("LIKWID requires both --likwid-group and --likwid-cpus")
     if args.likwid_group:
@@ -41,6 +48,9 @@ def counter_prefix(args, output):
 
 
 def metadata(args):
+    if getattr(args, "papi_events", None):
+        return dict(tool="PAPI", events=args.papi_events.split(","),
+                    scope="outermost callback regions on each execution thread while benchmark metrics scope is active; includes paused/setup callbacks")
     if args.likwid_group:
         return dict(tool="likwid-perfctr", group=args.likwid_group,
                     cpus=args.likwid_cpus,

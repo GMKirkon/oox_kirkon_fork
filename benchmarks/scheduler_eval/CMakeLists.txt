@@ -2,6 +2,27 @@ set(OOX_SCHEDULER_EVAL_MODES SERIAL_ELISION)
 set(OOX_SCHEDULER_EVAL_NON_REENTRANT_MODES RAPID_START)
 set(OOX_SCHEDULER_EVAL_TESTS)
 
+option(OOX_SCHEDULER_EVAL_PAPI "Enable optional per-thread PAPI callback counters" OFF)
+add_library(oox_eval_papi STATIC papi_metrics.cpp)
+target_link_libraries(oox_eval_papi PUBLIC OOX)
+if(OOX_SCHEDULER_EVAL_PAPI)
+  find_path(OOX_PAPI_INCLUDE_DIR papi.h REQUIRED)
+  find_library(OOX_PAPI_LIBRARY papi REQUIRED)
+  target_include_directories(oox_eval_papi PRIVATE ${OOX_PAPI_INCLUDE_DIR})
+  target_link_libraries(oox_eval_papi PUBLIC ${OOX_PAPI_LIBRARY})
+  target_compile_definitions(oox_eval_papi PUBLIC OOX_EVAL_HAVE_PAPI=1)
+endif()
+
+if(UNIX)
+  add_executable(test_eval_papi papi_metrics.cpp papi_test/fake_papi.cpp papi_test/tests.cpp)
+  target_include_directories(test_eval_papi PRIVATE ${CMAKE_CURRENT_LIST_DIR}/papi_test ${CMAKE_CURRENT_LIST_DIR})
+  target_compile_definitions(test_eval_papi PRIVATE OOX_EVAL_HAVE_PAPI=1 OOX_PAPI_UNIT_TEST=1)
+  target_link_libraries(test_eval_papi PRIVATE OOX)
+  add_test(NAME scheduler_eval_papi_lifecycle COMMAND test_eval_papi)
+  list(APPEND OOX_SCHEDULER_EVAL_TARGETS test_eval_papi)
+  list(APPEND OOX_SCHEDULER_EVAL_TESTS scheduler_eval_papi_lifecycle)
+endif()
+
 if(OOX_ENABLE_EIGEN)
   list(APPEND OOX_SCHEDULER_EVAL_MODES
     OOX_TASKS
@@ -18,6 +39,7 @@ if(OpenMP_FOUND)
 endif()
 
 function(oox_configure_scheduler_eval_target target mode)
+  target_link_libraries(${target} PRIVATE oox_eval_papi)
   target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_compile_definitions(${target} PRIVATE
     SCHEDULER_EVAL_MODE_NAME="${mode}")
@@ -133,6 +155,9 @@ if(OOX_ENABLE_EIGEN OR TBB_FOUND)
 endif()
 
 if(OOX_ENABLE_EIGEN AND Python3_Interpreter_FOUND)
+  add_test(NAME scheduler_eval_dataset_integrity
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/tests_datasets.py)
+  list(APPEND OOX_SCHEDULER_EVAL_TESTS scheduler_eval_dataset_integrity)
   add_test(NAME scheduler_eval_historical_tools
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/tests_tools.py)
   list(APPEND OOX_SCHEDULER_EVAL_TESTS scheduler_eval_historical_tools)

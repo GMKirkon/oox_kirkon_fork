@@ -53,7 +53,7 @@ std::vector<Point> QuickHullParallel(const std::vector<Point> &points,
   while (!frontier.empty()) {
     std::vector<std::array<HullPart, 2>> children(frontier.size());
     std::vector<Point> pivots(frontier.size());
-    ParallelFor(0, frontier.size(), [&](std::size_t index) {
+    EvalParallelFor(0, frontier.size(), [&](std::size_t index) {
       const auto &part = frontier[index];
       if (part.candidates.empty())
         return;
@@ -126,9 +126,9 @@ RemoveDuplicateStrings(const std::vector<std::string> &keys,
     capacity *= 2;
   constexpr auto empty = std::numeric_limits<std::size_t>::max();
   auto table = std::make_unique<std::atomic<std::size_t>[]>(capacity);
-  ParallelFor(0, capacity, [&](std::size_t i) { table[i].store(empty); });
+  EvalParallelFor(0, capacity, [&](std::size_t i) { table[i].store(empty); });
   std::atomic<std::uint64_t> probes{0};
-  ParallelFor(0, keys.size(), [&](std::size_t i) {
+  EvalParallelFor(0, keys.size(), [&](std::size_t i) {
     std::uint64_t hash = 14695981039346656037ull;
     for (unsigned char c : keys[i])
       hash = (hash ^ c) * 1099511628211ull;

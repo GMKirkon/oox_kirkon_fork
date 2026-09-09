@@ -154,11 +154,11 @@ template <bool ParallelTouch> void FirstTouch(benchmark::State &state) {
     const auto unmap = [bytes](std::uint64_t *p) { munmap(p, bytes); };
     std::unique_ptr<std::uint64_t, decltype(unmap)> data(address, unmap);
     if constexpr (ParallelTouch)
-      ParallelFor(0, size, [&](std::size_t i) { data.get()[i] = i + 1; });
+      EvalParallelFor(0, size, [&](std::size_t i) { data.get()[i] = i + 1; });
     else
       std::iota(data.get(), data.get() + size, std::uint64_t{1});
     state.ResumeTiming();
-    ParallelFor(0, size,
+    EvalParallelFor(0, size,
                 [&](std::size_t i) { output[i] = data.get()[i] * 3; });
     benchmark::DoNotOptimize(output.data());
     state.PauseTiming();

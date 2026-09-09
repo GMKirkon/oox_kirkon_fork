@@ -14,6 +14,7 @@ import subprocess
 import sys
 
 import hardware
+import datasets
 
 
 def capture(command, cwd):
@@ -52,9 +53,12 @@ def parse_args(root):
     parser.add_argument("--benchmark-min-time", default="0.5s")
     parser.add_argument("--filter", dest="benchmark_filter", default="")
     parser.add_argument("--smoke", action="store_true")
-    parser.add_argument("--graph", type=Path,
+    graph_input = parser.add_mutually_exclusive_group()
+    graph_input.add_argument("--graph", type=Path,
                         help="PBBS AdjacencyGraph file for BfsFile cases")
-    parser.add_argument("--source-vertex", type=int, default=0)
+    graph_input.add_argument("--dataset", choices=[name for name, entry in datasets.CATALOG["datasets"].items() if entry["format"] == "pasl-binary"])
+    parser.add_argument("--dataset-directory", type=Path, default=root / "results/original-datasets")
+    parser.add_argument("--source-vertex", type=int)
     parser.add_argument("--paper-scale", action="store_true",
                         help="also register 100-million-element primary cases")
     parser.add_argument("--no-plot", action="store_true")
@@ -64,6 +68,7 @@ def parse_args(root):
     parser.add_argument("--memory-node", type=int)
     parser.add_argument("--interleave-memory", action="store_true")
     parser.add_argument("--perf", action="store_true")
+    parser.add_argument("--papi-events", help="comma-separated PAPI integer events; requires a PAPI-enabled build")
     parser.add_argument("--likwid-group", help="LIKWID event group, e.g. MEM")
     parser.add_argument("--likwid-cpus", help="explicit CPU IDs, e.g. 0-3")
     parser.add_argument("--perf-events",
@@ -122,6 +127,9 @@ def write_heartbeat_comparison(raw, output, modes):
                 "tasks": per_iteration("tasks_scheduled"),
                 "observed_sleep_ns": per_iteration("idle_time_ns"),
                 "utilization": None,
+                "papi_counts_per_iteration": {
+                    key.removeprefix("papi_"): value / iterations for key, value in case.items()
+                    if key.startswith("papi_") and key != "papi_callback_regions"},
             })
     (output / "heartbeat_compat.json").write_text(json.dumps({
         "schema": 1,
@@ -135,6 +143,20 @@ def write_heartbeat_comparison(raw, output, modes):
 def main():
     root = Path(__file__).resolve().parents[2]
     args = parse_args(root)
+    dataset_record = None
+    if args.dataset:
+        entry = datasets.CATALOG["datasets"][args.dataset]
+        args.graph = args.dataset_directory / entry["file"]
+        record_path = args.dataset_directory / (entry["file"] + ".metadata.json")
+        dataset_record = json.loads(record_path.read_text())
+        if not dataset_record.get("complete") or dataset_record.get("identity") != entry:
+            raise ValueError("original dataset metadata does not match the catalogue")
+        if args.source_vertex is None:
+            args.source_vertex = entry["source_vertex"]
+    if args.source_vertex is None:
+        args.source_vertex = 0
+    if args.papi_events and cmake_cache(args.build.resolve()).get("OOX_SCHEDULER_EVAL_PAPI") not in ("ON", "TRUE", "1"):
+        raise RuntimeError("--papi-events requires -DOOX_SCHEDULER_EVAL_PAPI=ON")
     if args.source_vertex < 0 or args.source_vertex > 0xffffffff:
         raise ValueError("source-vertex must be a 32-bit unsigned vertex ID")
     if args.source_vertex and not args.graph:
@@ -189,6 +211,7 @@ def main():
         "smoke": args.smoke,
         "graph_file": str(args.graph.resolve()) if args.graph else None,
         "source_vertex": args.source_vertex,
+        "original_dataset": args.dataset,
         "paper_scale": args.paper_scale,
         "modes": modes,
         "execution_threads_by_mode": {
@@ -217,8 +240,14 @@ def main():
             for chunk in iter(lambda: stream.read(1024 * 1024), b""):
                 digest.update(chunk)
         metadata["graph_sha256"] = digest.hexdigest()
+        if dataset_record and metadata["graph_sha256"] != dataset_record["sha256"]:
+            raise ValueError("original dataset payload checksum mismatch")
     (output / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
     env = os.environ.copy()
+    if args.papi_events:
+        env["OOX_EVAL_PAPI_EVENTS"] = args.papi_events
+    else:
+        env.pop("OOX_EVAL_PAPI_EVENTS", None)
     if args.graph:
         env["OOX_BENCH_GRAPH"] = str(args.graph.resolve())
         env["OOX_BENCH_SOURCE"] = str(args.source_vertex)
@@ -242,7 +271,7 @@ def main():
         counter_output = raw / f"{counter_tool}_{mode}.csv"
         command = hardware.counter_prefix(args, counter_output) + command
         subprocess.run(command, env=env, check=True, timeout=args.timeout)
-        if hardware.metadata(args) and (
+        if (args.perf or args.likwid_group) and (
                 not counter_output.is_file() or not counter_output.stat().st_size):
             raise RuntimeError(f"counter collection produced no output: {counter_output}")
         json.loads((raw / f"bench_scheduler_eval_{mode}.json").read_text())

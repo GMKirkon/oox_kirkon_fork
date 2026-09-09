@@ -63,7 +63,7 @@ std::vector<std::uint32_t> MakeIterationCosts(CostKind kind, std::size_t size,
 
 std::uint64_t RunCostLoop(const std::vector<std::uint32_t> &costs) {
   std::vector<std::uint64_t> values(costs.size());
-  ParallelFor(0, costs.size(),
+  EvalParallelFor(0, costs.size(),
               [&](std::size_t i) { values[i] = Work(i, costs[i]); });
   return std::accumulate(values.begin(), values.end(), std::uint64_t{0});
 }

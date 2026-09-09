@@ -11,6 +11,22 @@ import hardware
 
 
 class HistoricalToolsTest(unittest.TestCase):
+    def test_papi_options_and_scope(self):
+        args = SimpleNamespace(perf=False, perf_events="cycles", cpu_node=None,
+                               likwid_group=None, likwid_cpus=None,
+                               papi_events="PAPI_TOT_CYC,PAPI_TOT_INS")
+        hardware.validate_options(args, check_tools=False)
+        self.assertEqual(hardware.counter_prefix(args, Path("unused.csv")), [])
+        self.assertEqual(hardware.metadata(args)["tool"], "PAPI")
+        for events in ("", "A,A", "A,", "A, B"):
+            args.papi_events = events
+            with self.subTest(events=events), self.assertRaises(ValueError):
+                hardware.validate_options(args, check_tools=False)
+        args.papi_events = "PAPI_TOT_CYC"
+        args.perf = True
+        with self.assertRaises(ValueError):
+            hardware.validate_options(args, check_tools=False)
+
     def test_rmat_profiles_and_small_graph_reader(self):
         program, args = recipe("rmat24")
         self.assertEqual(program, "rMatGraph")

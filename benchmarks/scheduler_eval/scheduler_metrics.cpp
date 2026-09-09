@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "scheduler_metrics.h"
+#include "papi_metrics.h"
 
 #include <benchmark/benchmark.h>
 
@@ -47,10 +48,20 @@ void ReportSchedulerMetrics(benchmark::State &state,
 }
 
 SchedulerMetricsScope::SchedulerMetricsScope(benchmark::State &state)
-    : state_(state), before_(ReadSchedulerMetrics()) {}
+    : state_(state), before_(ReadSchedulerMetrics()) {
+  BeginPapiMeasurement();
+}
 
 SchedulerMetricsScope::~SchedulerMetricsScope() {
   ReportSchedulerMetrics(state_, before_, ReadSchedulerMetrics());
+  const auto papi = EndPapiMeasurement();
+  if (!papi.error.empty()) {
+    state_.SkipWithError(papi.error.c_str());
+  } else if (!papi.events.empty()) {
+    state_.counters["papi_callback_regions"] = papi.regions;
+    for (std::size_t i = 0; i < papi.events.size(); ++i)
+      state_.counters["papi_" + papi.events[i]] = papi.values[i];
+  }
 }
 
 } // namespace scheduler_eval

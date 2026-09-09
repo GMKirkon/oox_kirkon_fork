@@ -26,6 +26,8 @@
 #include <utility>
 #include <vector>
 
+#include "eval_parallel.h"
+
 namespace scheduler_eval {
 
 inline int ExecutionThreads() {

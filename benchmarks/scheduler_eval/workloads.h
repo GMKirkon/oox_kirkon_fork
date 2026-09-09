@@ -64,7 +64,7 @@ inline void Spmv(const SparseMatrix &matrix, const std::vector<double> &input,
                  std::vector<double> &output) {
   assert(input.size() == matrix.columns);
   output.resize(matrix.rows);
-  ParallelFor(0, matrix.rows, [&](std::size_t row) {
+  EvalParallelFor(0, matrix.rows, [&](std::size_t row) {
     double sum = 0;
     for (std::size_t i = matrix.row_index[row]; i < matrix.row_index[row + 1];
          ++i)
@@ -87,7 +87,7 @@ inline double BlockedReduce(const std::vector<double> &data,
                             std::size_t block_size) {
   const auto blocks = (data.size() + block_size - 1) / block_size;
   std::vector<double> partial(blocks);
-  ParallelFor(0, blocks, [&](std::size_t block) {
+  EvalParallelFor(0, blocks, [&](std::size_t block) {
     double sum = 0;
     for (auto i = block * block_size;
          i < std::min(data.size(), (block + 1) * block_size); ++i)
@@ -101,14 +101,14 @@ inline void ExclusiveScan(std::vector<std::uint64_t> &data) {
   const std::size_t size = data.size();
   assert(size && (size & (size - 1)) == 0);
   for (std::size_t stride = 2; stride <= size; stride <<= 1) {
-    ParallelFor(0, size / stride, [&](std::size_t block) {
+    EvalParallelFor(0, size / stride, [&](std::size_t block) {
       const auto end = (block + 1) * stride - 1;
       data[end] += data[end - stride / 2];
     });
   }
   data.back() = 0;
   for (std::size_t stride = size; stride >= 2; stride >>= 1) {
-    ParallelFor(0, size / stride, [&](std::size_t block) {
+    EvalParallelFor(0, size / stride, [&](std::size_t block) {
       const auto end = (block + 1) * stride - 1;
       const auto left = end - stride / 2;
       const auto value = data[left];

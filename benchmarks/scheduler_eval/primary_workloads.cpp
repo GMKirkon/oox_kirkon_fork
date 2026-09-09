@@ -59,7 +59,7 @@ std::vector<Value> RadixSortParallelImpl(const std::vector<Value> &values,
     *metrics = {};
   for (unsigned shift = 0; shift < key_bits; shift += DigitBits) {
     const auto start = metrics ? Clock::now() : Clock::time_point{};
-    ParallelFor(0, blocks, [&](std::size_t block) {
+    EvalParallelFor(0, blocks, [&](std::size_t block) {
       counts[block].fill(0);
       const auto end = std::min(input.size(), (block + 1) * block_size);
       for (auto i = block * block_size; i < end; ++i)
@@ -71,7 +71,7 @@ std::vector<Value> RadixSortParallelImpl(const std::vector<Value> &values,
         offsets[block][bucket] = total;
         total += counts[block][bucket];
       }
-    ParallelFor(0, blocks, [&](std::size_t block) {
+    EvalParallelFor(0, blocks, [&](std::size_t block) {
       auto positions = offsets[block];
       const auto end = std::min(input.size(), (block + 1) * block_size);
       for (auto i = block * block_size; i < end; ++i)
@@ -140,14 +140,14 @@ std::vector<Point> ConvexHullParallel(const std::vector<Point> &points,
   std::vector<Point> sorted = points, buffer(points.size());
   const auto blocks = (points.size() + block_size - 1) / block_size;
   std::size_t merge_passes = 0;
-  ParallelFor(0, blocks, [&](std::size_t block) {
+  EvalParallelFor(0, blocks, [&](std::size_t block) {
     const auto begin = sorted.begin() + block * block_size;
     std::sort(begin, std::min(sorted.end(), begin + block_size), PointLess);
   });
   for (std::size_t width = block_size; width < sorted.size(); width *= 2) {
     ++merge_passes;
     const auto merges = (sorted.size() + 2 * width - 1) / (2 * width);
-    ParallelFor(0, merges, [&](std::size_t merge) {
+    EvalParallelFor(0, merges, [&](std::size_t merge) {
       const auto begin = std::min(sorted.size(), merge * 2 * width);
       const auto middle = std::min(sorted.size(), begin + width);
       const auto end = std::min(sorted.size(), begin + 2 * width);
@@ -243,8 +243,8 @@ RemoveDuplicatesParallel(const std::vector<std::uint32_t> &keys,
   const auto capacity = NextPowerOfTwo(keys.size() * 2);
   auto table = std::make_unique<std::atomic<std::uint64_t>[]>(capacity);
   std::atomic<std::uint64_t> hash_probes{0};
-  ParallelFor(0, capacity, [&](std::size_t i) { table[i].store(empty); });
-  ParallelFor(0, keys.size(), [&](std::size_t i) {
+  EvalParallelFor(0, capacity, [&](std::size_t i) { table[i].store(empty); });
+  EvalParallelFor(0, keys.size(), [&](std::size_t i) {
     const auto key = static_cast<std::uint64_t>(keys[i]);
     auto slot = (key * 11400714819323198485ull) & (capacity - 1);
     std::uint64_t probes = 0;
@@ -355,7 +355,7 @@ SampleSortParallelImpl(const std::vector<Value> &keys,
   const auto blocks = (keys.size() + block_size - 1) / block_size;
   std::vector<std::vector<std::size_t>> offsets(
       blocks, std::vector<std::size_t>(buckets));
-  ParallelFor(0, blocks, [&](std::size_t block) {
+  EvalParallelFor(0, blocks, [&](std::size_t block) {
     const auto end = std::min(keys.size(), (block + 1) * block_size);
     for (auto i = block * block_size; i < end; ++i)
       ++offsets[block]
@@ -376,7 +376,7 @@ SampleSortParallelImpl(const std::vector<Value> &keys,
       offsets[block][bucket - 1] += shift;
   }
   std::vector<Value> output(keys.size());
-  ParallelFor(0, blocks, [&](std::size_t block) {
+  EvalParallelFor(0, blocks, [&](std::size_t block) {
     auto positions = offsets[block];
     const auto end = std::min(keys.size(), (block + 1) * block_size);
     for (auto i = block * block_size; i < end; ++i) {
@@ -386,7 +386,7 @@ SampleSortParallelImpl(const std::vector<Value> &keys,
       output[positions[bucket]++] = keys[i];
     }
   });
-  ParallelFor(0, buckets, [&](std::size_t bucket) {
+  EvalParallelFor(0, buckets, [&](std::size_t bucket) {
 #ifndef RAPID_START_MODE
     const auto size = bucket_starts[bucket + 1] - bucket_starts[bucket];
     if (depth < 32 && size > 4 * block_size && size < keys.size()) {

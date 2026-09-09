@@ -2,6 +2,8 @@
 
 See [the porting-plan status](PLAN_STATUS.md) for the remaining gaps versus the
 original full reproduction plan.
+The current remaining scope is [original datasets and PAPI](DATASETS_AND_PAPI.md).
+Hardware measurement campaigns and legacy-runtime builds are not required.
 
 `SERIAL_ELISION` runs the same algorithms with serial loop execution. It keeps
 the requested thread count for workload-size formulas, while metadata and
@@ -26,7 +28,9 @@ and the entire selected benchmark suite. They are not individual kernel
 counters. LIKWID and `--perf` are mutually exclusive; LIKWID pinning cannot be
 combined with `--cpu-node`, though explicit memory placement is supported.
 An unavailable collector or missing output fails the run without marking it
-complete. PAPI instrumentation and useful-work utilization remain unmeasured.
+complete. Optional PAPI callback instrumentation is available with
+`-DOOX_SCHEDULER_EVAL_PAPI=ON` and `--papi-events`; useful-work utilization is
+still unmeasured. See the scope and limitations in `DATASETS_AND_PAPI.md`.
 The wrapper follows the [official LIKWID interface](https://github.com/RRZE-HPC/likwid/blob/master/doc/likwid-perfctr.1).
 See [historical inputs and baseline runners](HISTORICAL_BASELINES.md) for pinned
 PASL commands and revision-checked historical executable integration.

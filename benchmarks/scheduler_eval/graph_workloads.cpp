@@ -44,7 +44,7 @@ std::vector<int> BfsParallel(const CsrGraph &graph, bool nested,
     return {};
   }
   auto levels = std::make_unique<std::atomic<int>[]>(n);
-  ParallelFor(0, n, [&](std::size_t i) { levels[i].store(-1); });
+  EvalParallelFor(0, n, [&](std::size_t i) { levels[i].store(-1); });
   levels[source].store(0);
   std::vector<std::uint32_t> frontier{source};
   int level = 0;
@@ -56,7 +56,7 @@ std::vector<int> BfsParallel(const CsrGraph &graph, bool nested,
       capacity += graph.offsets[vertex + 1] - graph.offsets[vertex];
     std::vector<std::uint32_t> next(capacity);
     std::atomic<std::size_t> size{0};
-    ParallelFor(0, frontier.size(), [&](std::size_t i) {
+    EvalParallelFor(0, frontier.size(), [&](std::size_t i) {
       const auto vertex = frontier[i];
       const auto begin = graph.offsets[vertex], end = graph.offsets[vertex + 1];
       const auto degree = end - begin;
@@ -71,7 +71,7 @@ std::vector<int> BfsParallel(const CsrGraph &graph, bool nested,
       const auto started = Clock::now();
       if (promote) {
         nested_launches.fetch_add(1, std::memory_order_relaxed);
-        ParallelFor(begin, end, visit);
+        EvalParallelFor(begin, end, visit);
       } else {
         if (nested)
           sequential_inner_loops.fetch_add(1, std::memory_order_relaxed);
