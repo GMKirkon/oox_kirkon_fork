@@ -69,9 +69,8 @@ public:
                                                     std::memory_order_relaxed);
   }
   void ReleaseDonation() noexcept {
-    const bool pending = donation_pending.exchange(false, std::memory_order_release);
+    [[maybe_unused]] const bool pending = donation_pending.exchange(false, std::memory_order_release);
     assert(pending);
-    (void)pending;
   }
   void Fail(std::exception_ptr error) noexcept {
     std::lock_guard<scheduler_sync::mutex> lock(error_mutex);

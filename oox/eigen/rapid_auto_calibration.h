@@ -57,7 +57,7 @@ inline std::uint64_t Probe(RapidStartGroup group,
   std::uint64_t checksum = 0;
   for (auto value : output) checksum ^= value;
   volatile std::uint64_t consumed = checksum;
-  (void)consumed;
+  [[maybe_unused]] const auto final_read = consumed;
   return elapsed;
 }
 } // namespace auto_calibration_detail

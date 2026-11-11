@@ -45,9 +45,8 @@ public:
       if (selected == size_) break;
       auto &left = *seeds_[selected];
       // Auto's predicate mutates its budget; commit it only on the chosen leaf.
-      const bool divisible = left.state.IsDivisible();
+      [[maybe_unused]] const bool divisible = left.state.IsDivisible();
       assert(divisible);
-      (void)divisible;
       const auto split = left.state.GetSplit();
       Range right(left.range, split);
       seeds_[size_++].emplace(Seed{right, State(left.state, split)});
