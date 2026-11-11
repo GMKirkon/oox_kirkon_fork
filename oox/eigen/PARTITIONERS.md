@@ -237,12 +237,17 @@ the current sibling subtree finishes.
 Tail theft keeps the owner's leading work in place even before it starts.
 This preserves progress when a receiver is delayed before executing its donation.
 
-The slot's lock bit protects the descriptor through theft and unpublication.
-Sequentially consistent reservation/tag operations prevent overlapping owner
-and thief ranges. Unpublication occurs before the descriptor destructor and
-restores any enclosing descriptor during nested execution. A publication gate
-and pending-command check prevent captured owners from stealing their launch's
-work before accepting their own initial command.
+For an outer Rapid range that fits two 32-bit offsets, the worker has a
+pool-owned slot. The owner reserves a leading batch and a thief takes a trailing
+half by CAS on the same pair of offsets. Multiple thieves can reserve disjoint
+work concurrently. Each creates an independent completion tree in the region.
+A thief increments the slot's reader count before loading the stack descriptor.
+The owner clears the published pointer and drains readers before destroying it.
+
+Nested publications use the tagged LIFO chain, as do wider ranges and systems
+without lock-free 64-bit atomics. A thief tries the chain before the outer slot.
+On nested entry the owner can release unstarted callbacks from its pending batch.
+Both paths check for pending Rapid commands and unfinished initial publication.
 
 Captured commands borrow a joined-owner admission: their command join, rather
 than an admission counter, protects their callbacks. Stolen tasks acquire

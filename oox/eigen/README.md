@@ -166,7 +166,7 @@ are internal; their standalone syntax does not make them independent loop APIs.
 | `partitioner_task.h` | Range/task representation and ordinary publication |
 | `lazy_range_executor.h` | Owner batching/tail theft and separate `RunCooperativeRange` fallback |
 | `resident_command.h` | Pool-independent resident command types |
-| `stealable_range.h` | Tagged worker slot and stack-descriptor lifetime |
+| `stealable_range.h` | Worker range slots and stack-descriptor lifetime |
 
 For review, start with `ParallelForAuto` and `batch_detail::Execute`, then follow
 `RunLazyRange`, `Process`, and the completion types. Read the pool's claim,
@@ -175,7 +175,7 @@ publication and `WaitResident` paths last, using these contracts as checkpoints:
 | Contract | Where it is enforced |
 | --- | --- |
 | Every captured helper receives a command, including during cancellation | Claim followed by non-throwing publication; `WaitResident` cannot exit with a claimed bit |
-| A thief cannot access a destroyed stack descriptor | `RunLazyRange` closes registration before destruction; `StealableRange` serializes theft and unpublication |
+| A thief cannot access a destroyed stack descriptor | `RunLazyRange` closes registration before destruction; the concurrent slot drains its readers, and nested slots serialize theft and unpublication |
 | No initial owner can create a tree after the final Region check | `Execute` joins `ResidentCohort` first, then joins or closes `Region` |
 | Callback/metrics access ends before the tree may release Region | `Process` destroys `WorkLease` before `Branch` |
 | Worker reuse does not erase completion of an older cohort | Sticky done bits or monotonic epochs; readiness alone is not completion |

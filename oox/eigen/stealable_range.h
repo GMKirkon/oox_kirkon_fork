@@ -13,6 +13,7 @@ struct Task;
 // theft. Publication and unpublication acquire the same tag, so every ancestor
 // stays alive until the thief has finished traversing the chain.
 class StealableRange {
+  friend struct ConcurrentRangeSlot;
 public:
   virtual ~StealableRange() { assert(!slot_); }
   virtual Task *Steal() noexcept = 0;
@@ -94,4 +95,29 @@ private:
   scheduler_sync::atomic<uintptr_t> *slot_ = nullptr;
   StealableRange *previous_ = nullptr;
 };
+// Pool-owned flat-range lane. Pin before reading the stack descriptor. Retire
+// it before draining readers; a late reader observes null or a new publication.
+struct ConcurrentRangeSlot {
+  scheduler_sync::atomic<StealableRange *> range{nullptr};
+  scheduler_sync::atomic<size_t> readers{0};
+  scheduler_sync::atomic<uint64_t> bounds{0}; // two 32-bit offsets relative to begin
+
+  Task *TrySteal() noexcept {
+    if (!range.load(std::memory_order_relaxed)) return nullptr;
+    readers.fetch_add(1, std::memory_order_seq_cst);
+    auto *live = range.load(std::memory_order_seq_cst);
+    Task *result = live ? live->Steal() : nullptr;
+    readers.fetch_sub(1, std::memory_order_seq_cst);
+    return result;
+  }
+  void Close() noexcept {
+    range.store(nullptr, std::memory_order_seq_cst);
+    while (readers.load(std::memory_order_seq_cst)) scheduler_sync::Relax();
+  }
+  bool PrepareNested() noexcept {
+    auto *owned = range.load(std::memory_order_relaxed);
+    return owned && owned->OnNestedEntry();
+  }
+};
+
 } // namespace oox::detail::eigen_pool

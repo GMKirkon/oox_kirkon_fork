@@ -442,15 +442,28 @@ public:
   void PrepareNestedRange() noexcept {
     auto *pt = GetPerThread();
     if (!IsRegistered(pt) || !pt->owns_queue || !UsesResidentBusyWait()) return;
-    if (!StealableRange::PrepareNested(thread_data_[pt->thread_id].stealable_range)) return;
+    auto &data = thread_data_[pt->thread_id];
+    const bool released = data.stealable_range.load(std::memory_order_relaxed)
+        ? StealableRange::PrepareNested(data.stealable_range) : data.concurrent_range.PrepareNested();
+    if (!released) return;
     // Notify only after the slot is unlocked, using the existing demand hints.
     NotifyStealableRange();
   }
 
-  bool PublishStealableRange(StealableRange &range) noexcept {
+  template <class Range> bool PublishStealableRange(Range &range) noexcept {
     auto *pt = GetPerThread();
     if (!IsRegistered(pt) || !pt->owns_queue || !UsesResidentBusyWait()) return false;
-    range.Publish(thread_data_[pt->thread_id].stealable_range);
+    auto &data = thread_data_[pt->thread_id];
+    if (!data.stealable_range.load(std::memory_order_relaxed)) {
+      if constexpr (requires { range.TryPublishConcurrent(data.concurrent_range); }) {
+        if (range.TryPublishConcurrent(data.concurrent_range)) {
+          NotifyStealableRange();
+          return true;
+        }
+      }
+      data.concurrent_range.PrepareNested();
+    }
+    range.Publish(data.stealable_range);
     NotifyStealableRange();
     return true;
   }
@@ -949,6 +962,7 @@ private:
     // It remains stealable, including by waits inside the winning command.
     alignas(128) scheduler_sync::atomic<TaskPtr> resident_deferred{nullptr};
     scheduler_sync::atomic<uintptr_t> stealable_range{0};
+    ConcurrentRangeSlot concurrent_range;
 #ifdef OOX_SCHEDULER_TRACE
     int trace_worker = -1;
     uint64_t resident_trace_id = 0;
@@ -1399,7 +1413,8 @@ private:
     auto &source = thread_data_[scan.victim];
     const bool pending = !source.local_tasks.Empty() || !source.mailbox.empty() ||
         source.resident_deferred.load(std::memory_order_acquire) != nullptr ||
-        source.stealable_range.load(std::memory_order_acquire) != 0;
+        source.stealable_range.load(std::memory_order_acquire) != 0 ||
+        source.concurrent_range.range.load(std::memory_order_acquire) != nullptr;
     scan.retry |= pending;
     TaskPtr ordinary = pending ? source.PopBack(true) : nullptr;
     if (ordinary && scan.victim != worker)
@@ -1615,7 +1630,10 @@ private:
     const unsigned first = (uint64_t{Rand(&pt->rand)} * num_threads_) >> 32;
     for (unsigned offset = 0; offset < static_cast<unsigned>(num_threads_); ++offset) {
       const unsigned victim = (first + offset) % static_cast<unsigned>(num_threads_);
-      if (auto *task = StealableRange::TrySteal(thread_data_[victim].stealable_range)) {
+      auto &data = thread_data_[victim];
+      auto *task = StealableRange::TrySteal(data.stealable_range);
+      if (!task) task = data.concurrent_range.TrySteal();
+      if (task) {
         OOX_SCHED_EVENT("steal_range", task->trace_id, victim, pt->thread_id);
         AccountTask(task, victim);
 #ifdef OOX_EIGEN_ENABLE_STATS

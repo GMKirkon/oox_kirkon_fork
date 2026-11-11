@@ -142,7 +142,55 @@ void ReusedStackPublication() {
   TWIST_ASSERT(slot.load() == 0);
 }
 
-void ActiveRangeExactOnce() {
+void ConcurrentSlotRetirement() {
+  pool::ConcurrentRangeSlot slot;
+  struct HeldRange final : pool::StealableRange {
+    CountingTask *task = nullptr;
+    sync::atomic<unsigned> entered{0}, may_return{0}, returned{0};
+    pool::Task *Steal() noexcept override {
+      const unsigned ticket = entered.fetch_add(1) + 1;
+      while (may_return.load() < ticket) Yield();
+      returned.fetch_add(1);
+      return task;
+    }
+  } range;
+  CountingTask first, next;
+  range.task = &first;
+  slot.range.store(&range);
+  auto steal = [&] {
+    auto *task = slot.TrySteal();
+    TWIST_ASSERT(task == &first);
+    (*task)();
+  };
+  sync::thread a(steal), b(steal);
+  while (range.entered.load() < 2) Yield();
+  TWIST_ASSERT(slot.readers.load() == 2);
+  sync::thread owner([&] {
+    slot.Close();
+    TWIST_ASSERT_M(range.returned.load() == 2, "owner retired a range with a live reader");
+  });
+  while (slot.range.load()) Yield();
+  TWIST_ASSERT(slot.TrySteal() == nullptr);
+  range.may_return.store(1);
+  while (slot.readers.load() != 1) Yield();
+  TWIST_ASSERT(range.returned.load() == 1);
+  range.may_return.store(2);
+  owner.join();
+  // The same address can now serve another publication with different work.
+  range.task = &next;
+  range.may_return.store(3);
+  slot.range.store(&range);
+  auto *task = slot.TrySteal();
+  TWIST_ASSERT(task == &next);
+  (*task)();
+  slot.Close();
+  a.join();
+  b.join();
+  TWIST_ASSERT(slot.readers.load() == 0);
+  TWIST_ASSERT(first.calls.load() == 2 && next.calls.load() == 1);
+}
+
+template <bool Concurrent> void ActiveRangeExactOnce() {
   // A real one-worker executor services any ordinary descendants. The two
   // extra simulated thieves exercise the real ActiveRange independently of
   // resident activation, which the scheduler component tests separately.
@@ -165,14 +213,21 @@ void ActiveRangeExactOnce() {
     using Work = detail::Work<decltype(body), State>;
     auto *region = pool::NewSmallObject<detail::Region>(workers, nullptr, true);
     sync::atomic<uintptr_t> slot{0};
+    pool::ConcurrentRangeSlot concurrent_slot;
     {
       detail::Branch<Work, true> branch(nullptr);
+      State state(workers.NumThreads());
+      if constexpr (Concurrent) state.unpublished = &region->RapidPublication();
       detail::ActiveRange<decltype(body), State> owner(
-          *region, &body, {begin, begin + size, grain}, State(workers.NumThreads()), branch);
-      owner.Publish(slot);
+          *region, &body, {begin, begin + size, grain}, state, branch);
+      if constexpr (Concurrent) {
+        TWIST_ASSERT(owner.TryPublishConcurrent(concurrent_slot));
+      } else {
+        owner.Publish(slot);
+      }
       const auto steal = [&] {
         for (unsigned attempt = 0; attempt < 4; ++attempt) {
-          if (auto *task = pool::StealableRange::TrySteal(slot)) {
+          if (auto *task = Concurrent ? concurrent_slot.TrySteal() : pool::StealableRange::TrySteal(slot)) {
             stolen.fetch_add(1);
             (*task)();
           }
@@ -191,6 +246,7 @@ void ActiveRangeExactOnce() {
     region->TaskComplete();
     TWIST_ASSERT(stolen.load() != 0);
     TWIST_ASSERT(slot.load() == 0);
+    TWIST_ASSERT(!concurrent_slot.range.load() && concurrent_slot.readers.load() == 0);
     // Independent serial oracle for both coverage and computed values.
     for (size_t index = 0; index < size; ++index) {
       TWIST_ASSERT(visits[index].load() == 1);
@@ -244,7 +300,9 @@ int main() {
       {"concurrent_thieves", ConcurrentThieves, 64, false},
       {"unpublish_joins_thief", UnpublishJoinsThief, 64, false},
       {"reused_stack_publication", ReusedStackPublication, 64, false},
-      {"active_range_exact_once", ActiveRangeExactOnce, 16, false}};
+      {"active_range_exact_once", ActiveRangeExactOnce<false>, 16, false},
+      {"concurrent_slot_retirement", ConcurrentSlotRetirement, 64, false},
+      {"concurrent_slot_exact_once", ActiveRangeExactOnce<true>, 32, false}};
   for (const auto &scenario : scenarios)
     if (!Check(scenario)) return 1;
   std::cout << "PASS real range publication and reservation under bounded Twist simulation\n";

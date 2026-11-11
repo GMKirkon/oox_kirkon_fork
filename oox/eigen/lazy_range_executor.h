@@ -19,10 +19,26 @@ public:
         begin_(range.begin), grain_(range.grain), owner_(scheduler_sync::this_thread::get_id()) {
     state_.divisor = 0;
   }
+  bool TryPublishConcurrent(ConcurrentRangeSlot &slot) noexcept {
+    const size_t size = end_.load(std::memory_order_relaxed) - begin_;
+    // Initial Rapid owners join through their cohort. Each independent stolen
+    // subtree then keeps the asynchronous region alive through its own root.
+    if (!std::atomic<uint64_t>::is_always_lock_free || !state_.unpublished ||
+        size > UINT32_MAX || slot.range.load()) return false;
+    concurrent_ = &slot;
+    slot.bounds.store(size, std::memory_order_relaxed);
+    slot.range.store(this, std::memory_order_seq_cst);
+    return true;
+  }
   void Close() noexcept {
+    if (concurrent_) {
+      concurrent_->Close();
+      concurrent_ = nullptr;
+    }
     if (IsPublished()) Unpublish();
   }
   Task *Steal() noexcept final {
+    if (concurrent_) return StealConcurrent();
     const size_t first = head_.load(std::memory_order_seq_cst);
     const size_t last = end_.load(std::memory_order_relaxed);
     if (first >= last) {
@@ -69,14 +85,26 @@ public:
     // can access the unreserved remainder even while a callback is running.
     const size_t limit = std::max(grain_, (end_.load(std::memory_order_relaxed) - begin_ - 1) / 8 + 1);
     while (!region_.IsCancelled()) {
-      const size_t last = end_.load(std::memory_order_acquire);
-      if (cursor >= last) break;
-      const size_t next = cursor + std::min(quantum, last - cursor);
-      // SC orders this reservation against the slot tag: a later thief sees
-      // at least next; an earlier thief is joined and its shorter end reloaded.
-      head_.store(next, std::memory_order_seq_cst);
-      WaitForStealer();
-      const size_t stop = std::min(next, end_.load(std::memory_order_acquire));
+      size_t stop;
+      if (concurrent_) {
+        auto bounds = concurrent_->bounds.load(std::memory_order_relaxed);
+        for (;;) {
+          const size_t last = begin_ + uint32_t(bounds);
+          if (cursor >= last) return;
+          stop = cursor + std::min(quantum, last - cursor);
+          const uint64_t reserved = (uint64_t(stop - begin_) << 32) | uint32_t(bounds);
+          if (concurrent_->bounds.compare_exchange_weak(bounds, reserved)) break;
+        }
+      } else {
+        const size_t last = end_.load(std::memory_order_acquire);
+        if (cursor >= last) break;
+        const size_t next = cursor + std::min(quantum, last - cursor);
+        // SC orders this reservation against the slot tag: a later thief sees
+        // at least next; an earlier thief is joined and its shorter end reloaded.
+        head_.store(next, std::memory_order_seq_cst);
+        WaitForStealer();
+        stop = std::min(next, end_.load(std::memory_order_acquire));
+      }
       // A terminal-tail thief may have taken all work before this reservation.
       if (stop <= cursor) break;
       {
@@ -94,6 +122,52 @@ public:
   }
 
 private:
+  Task *StealConcurrent() noexcept {
+    if (region_.IsCancelled()) return nullptr;
+    if (state_.unpublished->load(std::memory_order_acquire)) {
+      OOX_SCHED_COUNT(RangeRejectedPublishing);
+      return nullptr;
+    }
+    if (region_.pool.HasResidentCommand()) {
+      OOX_SCHED_COUNT(RangeRejectedCommand);
+      return nullptr;
+    }
+    auto bounds = concurrent_->bounds.load(std::memory_order_relaxed);
+    for (;;) {
+      const uint32_t head = bounds >> 32, end = uint32_t(bounds);
+      if (head >= end) {
+        OOX_SCHED_COUNT(RangeRejectedEmpty);
+        return nullptr;
+      }
+      if (end - head <= grain_ && !nested_seen_.load()) {
+        OOX_SCHED_COUNT(RangeRejectedGrain);
+        return nullptr;
+      }
+      const uint32_t tail = end - head <= grain_ ? head : head + (end - head) / 2;
+      const uint64_t desired = (uint64_t(head) << 32) | tail;
+      if (!concurrent_->bounds.compare_exchange_weak(bounds, desired)) continue;
+      try {
+        State state = state_;
+        state.CheckDemand(true);
+        auto *child = NewSmallObject<Node>(region_, function_, LoopRange{begin_ + tail, begin_ + end, grain_},
+            State(state, partitioning::Split{}), 0, nullptr);
+        child->SetPublishingThreadId(owner_);
+        // No owner-side branch belongs to this independent stolen subtree.
+        PeerJoin<Node>::Release(child);
+        OOX_SCHED_EVENT("split", child->trace_id, begin_ + tail, begin_ + end, trace_parent_);
+        if (region_.metrics) region_.metrics->donated_ranges.fetch_add(1, std::memory_order_relaxed);
+#ifdef OOX_TEST_CONCURRENT_STEAL
+        OOX_TEST_CONCURRENT_STEAL();
+#endif
+        return child;
+      } catch (...) {
+        region_.Fail(std::current_exception());
+        return nullptr;
+      }
+    }
+  }
+
+  ConcurrentRangeSlot *concurrent_ = nullptr;
   struct Batch {
     Batch(Batch *&slot, size_t begin, size_t stop) : active(slot), next(begin), end(stop) {
       active = this;
@@ -106,10 +180,14 @@ private:
   };
   bool OnNestedEntry() noexcept final {
     if (!active_batch_ || active_batch_->released) return false;
-    // Called by the owner under the slot tag. end_ stays monotonic; released
+    // Only the owner changes its active batch. Released
     // callbacks below it are unstarted, and the running callback stays private.
     const size_t next = active_batch_->next;
-    head_.store(next, std::memory_order_seq_cst);
+    if (concurrent_) {
+      auto bounds = concurrent_->bounds.load(std::memory_order_relaxed);
+      while (!concurrent_->bounds.compare_exchange_weak(bounds,
+          (uint64_t(next - begin_) << 32) | uint32_t(bounds))) {}
+    } else head_.store(next, std::memory_order_seq_cst);
     // Finish the running callback, then reserve again from the live tail.
     active_batch_->end = next;
     active_batch_->released = true;
@@ -125,8 +203,8 @@ private:
   const size_t begin_, grain_;
   const scheduler_sync::thread::id owner_;
   Batch *active_batch_ = nullptr;
-  // Monotonic: read and written only while the slot tag is held.
-  bool nested_seen_ = false;
+  // Monotonic: compact-slot thieves can check this flag concurrently.
+  scheduler_sync::atomic<bool> nested_seen_{false};
 #ifdef OOX_SCHEDULER_TRACE
   const uint64_t trace_parent_ = ::oox::scheduler_trace::Current();
 #endif
