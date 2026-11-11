@@ -29,8 +29,9 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(benchmark)
 
-list(APPEND OOX_BENCHMARKS bench_fib bench_loops)
+list(APPEND OOX_BENCHMARKS bench_fib bench_loops bench_accounts bench_shared_var_get_heavy)
 option(OOX_BUILD_TASKBENCH "Build Task-Bench-style benchmarks" ON)
+option(OOX_BUILD_SCHEDULER_EVALS "Build composable-scheduler evaluation kernels" OFF)
 set(OOX_ALLOCATOR "system" CACHE STRING "Task allocation backend for TBB OOX tasks: tbb, system, or jemalloc")
 set_property(CACHE OOX_ALLOCATOR PROPERTY STRINGS tbb system jemalloc)
 set(OOX_BACKENDS)
@@ -90,6 +91,12 @@ if(folly_FOUND)
   list(APPEND FOLLY_LOOP_MODES FOLLY_FOR_EACH)
 endif()
 
+if(OOX_ENABLE_EIGEN)
+  message(STATUS "Building with the bundled Eigen scheduler")
+  list(APPEND OOX_BACKENDS EIGEN)
+  list(APPEND EIGEN_LIBS ${PROJECT_NAME}::eigen)
+endif()
+
 foreach(bench IN LISTS OOX_BENCHMARKS)
   foreach(mode IN LISTS OOX_BACKENDS)
     if("${bench}" MATCHES "loops")
@@ -98,6 +105,12 @@ foreach(bench IN LISTS OOX_BENCHMARKS)
       set(OOX_LOOP_MODES exe)
     endif()
     foreach(suffix IN LISTS OOX_LOOP_MODES)
+      set(bench_ctest_filter ${OOX_BENCHMARK_CTEST_FILTER})
+      if(bench STREQUAL "bench_accounts")
+        set(bench_ctest_filter "^BenchAccounts/10/100000$")
+      elseif(bench STREQUAL "bench_shared_var_get_heavy")
+        set(bench_ctest_filter "^BenchGetHeavy.*threads:2$")
+      endif()
       add_executable(${bench}_${mode}.${suffix} ${bench}.cpp)
       target_compile_definitions(${bench}_${mode}.${suffix} PRIVATE PARALLEL=${suffix} HAVE_${mode})
       target_link_libraries(${bench}_${mode}.${suffix} ${PROJECT_NAME} benchmark::benchmark ${${mode}_LIBS})
@@ -105,7 +118,7 @@ foreach(bench IN LISTS OOX_BENCHMARKS)
       add_test(NAME ${bench}_${mode}.${suffix}
                COMMAND ${bench}_${mode}.${suffix}
                        --benchmark_min_time=${OOX_BENCHMARK_CTEST_MIN_TIME}
-                       --benchmark_filter=${OOX_BENCHMARK_CTEST_FILTER})
+                       --benchmark_filter=${bench_ctest_filter})
     endforeach()
   endforeach()
 endforeach()
@@ -129,17 +142,17 @@ foreach(mode IN LISTS OOX_BACKENDS)
   endforeach()
 endforeach()
 
-if(TBB_FOUND OR Taskflow_FOUND)
+# Disable TF benchmarks while it has deadlock due to taskflow issues
+if(TBB_FOUND)
   add_executable(bench_taskbench_alt_failures bench_taskbench_alt_failures.cpp)
   target_compile_definitions(bench_taskbench_alt_failures PRIVATE
-    HAVE_TBB=$<BOOL:${TBB_FOUND}>
-    HAVE_TF=$<BOOL:${Taskflow_FOUND}>
+    HAVE_TBB=1
+    HAVE_TF=0
   )
   target_link_libraries(bench_taskbench_alt_failures PRIVATE
     ${PROJECT_NAME}
     benchmark::benchmark
     ${TBB_LIBS}
-    ${TF_LIBS}
   )
   target_include_directories(bench_taskbench_alt_failures PRIVATE
     ${PROJECT_NAME}
@@ -155,4 +168,8 @@ endif()
 
 if(OOX_BUILD_TASKBENCH)
   add_subdirectory(taskbench)
+endif()
+
+if(OOX_BUILD_SCHEDULER_EVALS)
+  add_subdirectory(scheduler_eval)
 endif()

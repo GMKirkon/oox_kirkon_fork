@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.18)
 MESSAGE(STATUS "CMAKE_ROOT=" ${CMAKE_ROOT})
 
 # Project name
@@ -20,8 +20,12 @@ FetchContent_MakeAvailable(googletest)
 # build options
 option(OOX_BUILD_BENCHMARKS "Enables builds of benchmarks" ON)
 option(OOX_BUILD_TESTS "Enables builds of tests" ON)
+option(OOX_BUILD_EXAMPLES "Enables builds of examples" ON)
 option(OOX_BUILD_TWIST_TESTS "Build Twist-based concurrency tests" OFF)
 option(OOX_ENABLE_TBB "Enable TBB for threading (priority)" ON)
+option(OOX_ENABLE_EIGEN "Enable the bundled Eigen work-stealing backend" ON)
+set(OOX_EIGEN_THREADS "0" CACHE STRING
+    "OOX Eigen worker count (0 uses hardware_concurrency with a fallback of 1)")
 option(OOX_LOCAL_TBB "Force local copy of TBB" OFF)
 option(OOX_ENABLE_TF "Enable Taskflow for threading" ON)
 option(OOX_LOCAL_TF "Force local copy of TaskFlow" OFF)
@@ -60,13 +64,18 @@ find_package(Threads REQUIRED)
 
 if (OOX_ENABLE_TBB)
   if (NOT OOX_LOCAL_TBB)
-    find_package(TBB 2021 QUIET)  # not REQUIRED
+    find_package(TBB 2022.3 QUIET)  # not REQUIRED
   endif ()
   if (NOT TBB_FOUND)
     execute_process(COMMAND git submodule update --init --depth=1 thirdparty/oneTBB/
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
     option(TBB_TEST OFF)
     add_subdirectory(thirdparty/oneTBB onetbb)
+    if (TARGET tbb AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
+        CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 15 AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16)
+      # oneTBB 2022.3 lacks the GCC 15 workaround for notify_one_relaxed (upstream PR #2029).
+      target_compile_options(tbb PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-error=stringop-overflow>)
+    endif ()
     set(TBB_FOUND ON)
   endif ()
 endif ()
@@ -81,7 +90,6 @@ if (OOX_ENABLE_TF)
     option(TF_BUILD_TESTS OFF)
     option(TF_BUILD_EXAMPLES OFF)
     add_subdirectory(thirdparty/taskflow taskflow)
-    add_library(Taskflow::Taskflow ALIAS Taskflow)
     set(Taskflow_FOUND ON)
   endif ()
 endif ()
@@ -152,7 +160,7 @@ endif ()
 # Library
 add_library(${PROJECT_NAME} INTERFACE)
 add_library(${PROJECT_NAME}::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
-target_compile_features(${PROJECT_NAME} INTERFACE cxx_std_11)
+target_compile_features(${PROJECT_NAME} INTERFACE cxx_std_20)
 target_link_libraries(${PROJECT_NAME} INTERFACE Threads::Threads)
 if (OOX_EXCEPTIONS_ENABLED)
   target_compile_definitions(${PROJECT_NAME} INTERFACE OOX_EXCEPTIONS_ENABLED=1)
@@ -164,6 +172,20 @@ target_include_directories(${PROJECT_NAME} INTERFACE
         $<INSTALL_INTERFACE:include/>
 )
 
+if (OOX_ENABLE_EIGEN)
+  if (NOT OOX_EIGEN_THREADS MATCHES "^[0-9]+$")
+    message(FATAL_ERROR "OOX_EIGEN_THREADS must be a non-negative integer")
+  endif ()
+  add_library(OOXEigen INTERFACE)
+  add_library(${PROJECT_NAME}::eigen ALIAS OOXEigen)
+  set_target_properties(OOXEigen PROPERTIES EXPORT_NAME eigen)
+  target_compile_features(OOXEigen INTERFACE cxx_std_20)
+  target_compile_definitions(OOXEigen INTERFACE
+          HAVE_EIGEN=1
+          OOX_EIGEN_NUM_THREADS=${OOX_EIGEN_THREADS})
+  target_link_libraries(OOXEigen INTERFACE ${PROJECT_NAME} Threads::Threads)
+endif ()
+
 enable_testing()
 if (OOX_BUILD_TESTS)
   add_subdirectory(tests)
@@ -172,6 +194,10 @@ endif (OOX_BUILD_TESTS)
 if (OOX_BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
 endif (OOX_BUILD_BENCHMARKS)
+
+if (OOX_BUILD_EXAMPLES)
+  add_subdirectory(examples)
+endif (OOX_BUILD_EXAMPLES)
 
 # -----------------------------------------------------------------------------
 # create find_package(OOX CONFIG)
@@ -182,15 +208,19 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/oox DESTINATION ${CMAKE_INSTALL_IN
 
 # export target
 set_target_properties(${PROJECT_NAME} PROPERTIES EXPORT_NAME ${PROJECT_NAME})
+set(OOX_EXPORT_TARGETS ${PROJECT_NAME})
+if (OOX_ENABLE_EIGEN)
+  list(APPEND OOX_EXPORT_TARGETS OOXEigen)
+endif ()
 
 export(
-        TARGETS ${PROJECT_NAME}
+        TARGETS ${OOX_EXPORT_TARGETS}
         NAMESPACE ${PROJECT_NAME}::
         FILE ${PROJECT_NAME}Targets.cmake
 )
 export(PACKAGE ${PROJECT_NAME})
 
-install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}Targets)
+install(TARGETS ${OOX_EXPORT_TARGETS} EXPORT ${PROJECT_NAME}Targets)
 install(
         EXPORT ${PROJECT_NAME}Targets
         NAMESPACE ${PROJECT_NAME}::
@@ -204,7 +234,7 @@ configure_package_config_file(
         ${PROJECT_NAME}Config.cmake.in
         ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake
         INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
-        PATH_VARS CMAKE_INSTALL_FULL_INCLUDEDIR
+        PATH_VARS CMAKE_INSTALL_INCLUDEDIR
 )
 
 write_basic_package_version_file(
