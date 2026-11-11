@@ -74,8 +74,8 @@ First-touch tests allocate fresh anonymous mappings per repetition, so vector
 initialization or allocator reuse cannot pre-touch the input pages.
 
 The suite also builds `OOX_TASKS`, which expresses parallel ranges as recursive
-`oox::run` tasks joined through `oox::var`. It reads counters from OOX's actual
-pool. Its thread count is the library's build setting `OOX_EIGEN_THREADS`
+`oox::run` tasks joined through `oox::var`. With `OOX_SCHEDULER_EVAL_STATS=ON`,
+it reads counters from OOX's actual pool. Its thread count is the library's build setting `OOX_EIGEN_THREADS`
 (zero means detected hardware concurrency); configure that value to match the
 runner's `--threads` for cross-mode comparisons.
 Automatic OOX task grains target eight ranges per worker, capped at 1,024
@@ -126,6 +126,26 @@ CMake includes only installed/enabled backends. Eigen contributes
 `EIGEN_SHARING_STEALING`, plus the oneTBB-derived `EIGEN_AUTO`,
 `EIGEN_SIMPLE`, `EIGEN_STATIC`, and `EIGEN_AFFINITY` range policies.
 See [the partitioner API and placement semantics](../../oox/eigen/PARTITIONERS.md).
+
+With `OOX_SCHEDULER_TRACE_TOOLS=ON`, opt-in paired probes additionally build
+`measure_scheduler_RAPID_NATIVE_{AUTO,SIMPLE,STATIC,AFFINITY}` and
+`measure_scheduler_NATIVE_{AUTO,SIMPLE,STATIC,AFFINITY}_RESIDENT`. They reuse the
+calibration suite (10 launch/balanced/tail/cluster/single-heavy cases), fixed
+grain 2 and identical resident-capable pools. Only initial Rapid activation
+differs within each pair. They are not part of the full `run.py` mode matrix.
+For example, after configuring a stats/PAPI/sanitizer-free Release build:
+
+```sh
+cmake --build build-eval --target measure_scheduler_RAPID_NATIVE_AUTO measure_scheduler_NATIVE_AUTO_RESIDENT -j
+BENCH_NUM_THREADS=8 OOX_RAPID_RESIDENT_LIMIT=8 ./build-eval/benchmarks/scheduler_eval/measure_scheduler_NATIVE_AUTO_RESIDENT --kernel arithmetic_v1 --min-ms 40
+BENCH_NUM_THREADS=8 OOX_RAPID_RESIDENT_LIMIT=8 ./build-eval/benchmarks/scheduler_eval/measure_scheduler_RAPID_NATIVE_AUTO --kernel arithmetic_v1 --min-ms 40
+```
+
+Use repeated fresh processes, alternating the pair order; a single invocation
+is only a smoke check. `RAPID_NATIVE_AUTO` means the explicit native Auto policy,
+not the optimized lazy `RAPID_AUTO`, and neither means upstream Eigen's original
+recursive loop. Do not combine measurements from different kernels.
+
 TBB contributes simple, automatic, static, and affinity partitioners, plus the historical bitmask `RAPID_START` prototype. OpenMP
 contributes static, dynamic-nonmonotonic, and guided-nonmonotonic schedules.
 
@@ -212,10 +232,6 @@ The tools deliberately separate two costs that are often mixed together:
   not invent internal mailbox/deque events that the public `ParallelFor` API
   cannot observe.
 
-For the same reason, the full runner omits the blocking `barrier` scenario for
-`EIGEN_STEALING_GRAINSIZE`. Spin and multitask measurements remain valid for
-that mode.
-
 ## Run and inspect results
 
 The runner discovers built policies, sets one worker count for all backends,
@@ -285,3 +301,25 @@ amortization, and an observed-versus-predicted SpMV plot to that result. The
 research lineage, publication-time estimator, parameter-selection procedure,
 published foundations, limitations, and next measurements are in
 [*Estimating Rapid Start and choosing scheduler parameters*](docs/PERFORMANCE_MODEL.md).
+
+## Fast-group comparison
+
+`RAPID_GROUP` runs the Eigen pool's resident range groups on the existing
+workload suite, including nested and worker-availability checks. `RAPID_START`
+retains upstream's historical TBB prototype. Compare with `EIGEN_AUTO` and
+`EIGEN_STATIC`; resident mode is opt-in and consumes idle CPU.
+`RAPID_AUTO` combines fast resident activation with the existing AutoPartitioner.
+`EIGEN_AUTO_RESIDENT` is the ordinary Auto control on the same idle policy.
+The Rapid+Auto adapter calibrates its resident limit at startup; set
+`OOX_RAPID_RESIDENT_LIMIT=N` to use a fixed cohort instead.
+
+Configure `OOX_SCHEDULER_EVAL_STATS=OFF` for timings without Eigen's diagnostic
+counter updates (default ON). The runner records this setting. For direct
+backend loops, use `bench_loops_EIGEN.EIGEN_AUTO_LOOP` and
+`bench_loops_EIGEN.EIGEN_RAPID_GROUP_LOOP`, or
+`bench_loops_EIGEN.EIGEN_RAPID_AUTO_LOOP` for the adaptive implementation.
+
+Direct-loop CTest smoke cases use the `backend-loops` label and the registered
+size 64. An unmatched benchmark filter is a test failure, not an empty success.
+The scheduler-eval CI job with external backends disabled builds and runs all
+three Eigen loop modes once, with two threads.
